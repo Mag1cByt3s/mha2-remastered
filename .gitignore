@@ -1,0 +1,29 @@
+# Original copyrighted game files & disc images — NEVER commit
+Moorhuhn Sammelbox*
+game_files/
+extracted_assets/
+hd_assets/
+*.bin
+*.cue
+*.ccd
+*.sub
+*.exe
+*.EXE
+*.dat
+*.avi
+*.sav
+*.hsc
+*.log
+mha2_settings.ini
+tools/models/
+
+# Reverse engineering work artifacts & lifted derivative C code
+work/
+recomp/gen/
+build/
+backups/
+mha2_linux
+*.o
+__pycache__/
+*.pyc
+screenshots/

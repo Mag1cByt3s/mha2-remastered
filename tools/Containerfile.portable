@@ -1,0 +1,69 @@
+FROM docker.io/library/ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    pkg-config \
+    nasm \
+    yasm \
+    curl \
+    xz-utils \
+    ca-certificates \
+    patchelf \
+    libsdl2-dev \
+    libsdl2-ttf-dev \
+    libgl-dev \
+    zlib1g-dev \
+    fonts-dejavu-core \
+    binutils \
+  && rm -rf /var/lib/apt/lists/*
+
+# Build minimal static FFmpeg 6.1.2 (local files, video/audio decoders used by MHA2, SIMD enabled)
+RUN curl -fsSL https://ffmpeg.org/releases/ffmpeg-6.1.2.tar.xz -o /tmp/ffmpeg.tar.xz \
+  && mkdir -p /tmp/ffmpeg-src \
+  && tar -xf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg-src --strip-components=1 \
+  && cd /tmp/ffmpeg-src \
+  && ./configure \
+       --prefix=/opt/ffmpeg-min \
+       --enable-static --disable-shared --enable-pic \
+       --disable-programs --disable-doc --disable-debug --disable-network \
+       --disable-autodetect --disable-everything \
+       --enable-pthreads --enable-zlib \
+       --enable-protocol=file \
+       --enable-demuxer=mov,avi,matroska \
+       --enable-parser=h264,mpegvideo,mpeg4video,mjpeg \
+       --enable-decoder=h264,mpeg1video,mpeg2video,mpeg4,cinepak,mjpeg,msvideo1,indeo3,indeo5,rawvideo,pcm_s16le,pcm_u8,mp3,aac \
+       --enable-swscale \
+  && make -j"$(nproc)" \
+  && make install \
+  && rm -rf /tmp/ffmpeg.tar.xz /tmp/ffmpeg-src
+
+# PipeWire dev headers for SDL2 dlopen backend (separate layer after FFmpeg to preserve cache)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpipewire-0.3-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+# Build upstream SDL2 2.32.4 with dlopen backends enabled (no hard DT_NEEDED on Pulse/Wayland/PipeWire/GBM/libdecor)
+RUN curl -fsSL https://github.com/libsdl-org/SDL/releases/download/release-2.32.4/SDL2-2.32.4.tar.gz -o /tmp/sdl2.tar.gz \
+  && mkdir -p /tmp/sdl2-src \
+  && tar -xf /tmp/sdl2.tar.gz -C /tmp/sdl2-src --strip-components=1 \
+  && cd /tmp/sdl2-src \
+  && ./configure \
+       --prefix=/opt/sdl2-portable \
+       --enable-shared --disable-static --disable-rpath \
+       --enable-video-x11 --enable-x11-shared \
+       --enable-video-wayland --enable-wayland-shared --enable-libdecor-shared \
+       --enable-video-kmsdrm --enable-kmsdrm-shared \
+       --enable-video-opengl \
+       --enable-alsa --enable-alsa-shared \
+       --enable-pulseaudio --enable-pulseaudio-shared \
+       --enable-pipewire --enable-pipewire-shared \
+       --disable-sndio --disable-jack --disable-esd --disable-arts --disable-nas --disable-oss \
+       --disable-ibus --disable-fcitx --disable-video-vulkan \
+  && make -j"$(nproc)" \
+  && make install \
+  && readelf -d /opt/sdl2-portable/lib/libSDL2-2.0.so.0 | grep NEEDED \
+  && rm -rf /tmp/sdl2.tar.gz /tmp/sdl2-src
+
+ENV PKG_CONFIG_PATH=/opt/sdl2-portable/lib/pkgconfig:/opt/ffmpeg-min/lib/pkgconfig
