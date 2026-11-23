@@ -144,6 +144,19 @@ mkdir -p "$STAGE/lib" "$STAGE/fonts" "$STAGE/game_files/mha2.sav" "$ROOT/work/bu
         fi
     done
 
+    codec_syms="$(nm --defined-only /opt/ffmpeg-min/lib/libavcodec.a 2>/dev/null)"
+    for sym in ff_webp_decoder ff_png_decoder ff_bmp_decoder ff_png_encoder; do
+        if ! grep -qE " [DT] ${sym}$" <<< "$codec_syms"; then
+            echo "ERROR: Required FFmpeg codec symbol $sym missing from /opt/ffmpeg-min/lib/libavcodec.a" >&2
+            exit 1
+        fi
+    done
+    fmt_syms="$(nm --defined-only /opt/ffmpeg-min/lib/libavformat.a 2>/dev/null)"
+    if ! grep -qE " [DT] ff_image2_demuxer$" <<< "$fmt_syms"; then
+        echo "ERROR: Required FFmpeg image2 demuxer missing from /opt/ffmpeg-min/lib/libavformat.a" >&2
+        exit 1
+    fi
+
     echo "[pack] ABI & portability verification passed!"
 '
 

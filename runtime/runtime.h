@@ -131,6 +131,7 @@ typedef struct GameHotspot {
     char label[128];   /* UTF-8 hover name from engine string table (may be empty) */
 } GameHotspot;
 int  game_collect_room_hotspots(GameHotspot *out, int max_out);
+int  game_is_main_menu_active(void);
 int  win32_ddraw_dispatch(CpuCtx *c, uint32_t import_id);
 void com_ddraw_dispatch(CpuCtx *c, uint32_t iface_id, uint32_t slot);
 

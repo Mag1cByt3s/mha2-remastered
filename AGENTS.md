@@ -56,7 +56,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
   bash tools/package_portable_linux.sh --no-archive # stages bundle + runs ABI checks without tarballing
   ```
 - **Never bundle NixOS `.so` libraries, `libSDL3.so.0`, or `SDL_DYNAMIC_API` in portable releases:** Nixpkgs binaries/libs pull `GLIBC_2.42`, `GLIBCXX_3.4.32`, `CXXABI_1.3.15`, unversioned `DT_NEEDED: libvulkan.so`, Nixpkgs `libstdc++`, and hardcoded `/nix/store` paths, breaking Ubuntu/Mint/Fedora/SteamOS.
-- Keep minimal static FFmpeg (`--prefix=/opt/ffmpeg-min` built with `nasm` SIMD) and verified ABI/font checks inside `tools/package_portable_linux.sh` (max `GLIBC_2.35`, zero `/nix/store` strings, zero hard `DT_NEEDED` on `libvulkan.so`/`libpipewire`/`libpulse`/`libwayland`/`libEGL`/`libgbm`/`libdecor`, bundled `fonts/DejaVu*.ttf`).
+- Keep minimal static FFmpeg (`--prefix=/opt/ffmpeg-min` built with `nasm` SIMD) and verified ABI/font/FFmpeg image-codec checks (`ff_webp_decoder`, `ff_png_decoder`, `ff_bmp_decoder`, `ff_png_encoder`, `ff_image2_demuxer`) inside `tools/package_portable_linux.sh` (max `GLIBC_2.35`, zero `/nix/store` strings, zero hard `DT_NEEDED` on `libvulkan.so`/`libpipewire`/`libpulse`/`libwayland`/`libEGL`/`libgbm`/`libdecor`, bundled `fonts/DejaVu*.ttf`).
 
 ---
 
@@ -78,8 +78,8 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 - `runtime/win32_kernel.c`: Win32 threads, events/semaphores/mutexes, handles (locked `ThreadObj`/`SyncObj` refcounting), GL-thread-guarded `ExitProcess`/`TerminateProcess`, case-insensitive VFS/save paths, file I/O, timers.
 - `runtime/win32_ddraw.c`: DirectDraw 7 surfaces, hardware-accelerated/emulated blits, RLE sprite hooks (`hook_rle_both`, `hook_rle_common`), `surface_blt()`, palette/color-key conversion, decoupled cursor tracking (1-frame, 2-frame horizontal `mc*`, 2-frame vertical `cuHelp`).
 - `runtime/hd_assets.c`, `runtime/hd_assets.h`: `HDS5` 24×24 signature matching (`is_small_prop`, low-opacity fallback), 4K WebP background & sprite index caches (`.hd_index.cache`, `.hd_sprite_index.cache`), strip cell auto-discovery (`hd_sprites_find_strip_cell()`), background preloader thread, sprite room allowlisting (`sprite_allowed_in_active_room()`).
-- `runtime/gl_renderer.c`, `runtime/gl_renderer.h`: OpenGL 3.3 Core renderer, 4K HD canvas FBO, shaders (Bicubic CAS, Lanczos, Edge Smooth, FSR1, CRT, Bloom, Color Grading), widescreen `16:10`/`16:9` HUD/dialog split composition (`uDialogBar`, `g_top_bar_has_buttons`, `gl_renderer_clamp_gamepad_cursor()`), `F1` interactive settings menu, `Ctrl+L` Dialog Log (`gl_dialog_log_shutdown()`), vector typography (`SDL2_ttf`), GPU post-FX & compare split-screen (`F2`), decoupled cursor, hotspot overlay, `gl_renderer_is_gl_thread()`.
-- `runtime/game_patches.c`: Original 2005 game bugfixes (`game_patches_install()` via `install_patch()`: spinlock CPU burn, savegame EOF hang, loading sleep throttle, null derefs, handle leaks), hot-path native replacements, and exact read-only scene-graph hotspot collector (`game_collect_room_hotspots()`).
+- `runtime/gl_renderer.c`, `runtime/gl_renderer.h`: OpenGL 3.3 Core renderer, 4K HD canvas FBO, procedural 3D brushed-gold Main Menu `"REMASTERED"` badge overlay, shaders (Bicubic CAS, Lanczos, Edge Smooth, FSR1, CRT, Bloom, Color Grading), widescreen `16:10`/`16:9` HUD/dialog split composition (`uDialogBar`, `g_top_bar_has_buttons`, `gl_renderer_clamp_gamepad_cursor()`), `F1` interactive settings menu, `Ctrl+L` Dialog Log (`gl_dialog_log_shutdown()`), vector typography (`SDL2_ttf`), GPU post-FX & compare split-screen (`F2`), decoupled cursor, hotspot overlay, `gl_renderer_is_gl_thread()`.
+- `runtime/game_patches.c`: Original 2005 game bugfixes (`game_patches_install()` via `install_patch()`: spinlock CPU burn, savegame EOF hang, loading sleep throttle, null derefs, handle leaks), hot-path native replacements, read-only Main Menu detector (`game_is_main_menu_active()`), and exact read-only scene-graph hotspot collector (`game_collect_room_hotspots()`).
 - `runtime/win32_user_gdi.c`: SDL2 window/event loop, focus-loss QoL reset (`clear_held_qol_keys()`), input state, atomic audio hotkey updates (`F7`/`F8`/`F9`), GDI font/TextOutA hooking (Windows-1252 → UTF-8, `find_system_ttf()`), gamepad cursor emulation.
 - `runtime/win32_dinput.c`: DirectInput keyboard/mouse COM stubs (`com_dinput_dispatch`).
 - `runtime/win32_dsound.c`: DirectSound mixing + SDL2 audio callback + reverb/EQ DSP (reads shared `g_cfg` audio fields atomically).
@@ -128,7 +128,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 
 7. **GL Thread Ownership & Resource Teardown:**
    - `gl_renderer_shutdown()` and `SDL_Quit()` (including from `ExitProcess`/`TerminateProcess` in `runtime/win32_kernel.c`) must only run on the GL thread (`gl_renderer_is_gl_thread()`).
-   - Any new GL texture/FBO/program added in `runtime/gl_renderer.c` (such as `g_dialog_log_tex` via `gl_dialog_log_shutdown()`) must be deleted inside `gl_renderer_shutdown()`.
+   - Any new GL texture/FBO/program added in `runtime/gl_renderer.c` (such as `g_dialog_log_tex` via `gl_dialog_log_shutdown()` and `g_remastered_badge_tex`) must be deleted inside `gl_renderer_shutdown()`.
 
 8. **Lock-Free Audio Config Atomics:**
    - `runtime/win32_dsound.c` reads `g_cfg.master_volume`, `g_cfg.muted`, `g_cfg.audio_reverb`, and `g_cfg.audio_eq` on the SDL audio callback thread using `__atomic_load` / `__atomic_load_n`.

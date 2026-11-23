@@ -293,6 +293,14 @@ static int g_hd_canvas_has_draws = 0;
 static GLuint g_patch_tex = 0;
 static int g_patch_tex_w = 0, g_patch_tex_h = 0;
 
+/* Procedural clean-room 3D gold "REMASTERED" Main Menu title overlay */
+static int    g_bg_is_main_menu = 0;
+static GLuint g_remastered_badge_tex = 0;
+static int    g_remastered_badge_ink_w = 0;
+static int    g_remastered_badge_ink_h = 0;
+static int    g_remastered_badge_pad = 0;
+static int    g_remastered_badge_tried = 0;
+
 /* Smooth GPU crossfade transition timer */
 static int g_trans_pending = 0;
 static int g_trans_active = 0;
@@ -2349,6 +2357,10 @@ void gl_renderer_shutdown(void) {
     if (g_bg_orig_tex) { glDeleteTextures(1, &g_bg_orig_tex); g_bg_orig_tex = 0; }
     if (g_bg_hd_tex) { glDeleteTextures(1, &g_bg_hd_tex); g_bg_hd_tex = 0; }
     if (g_bg_wide_tex) { glDeleteTextures(1, &g_bg_wide_tex); g_bg_wide_tex = 0; g_bg_wide_has = 0; }
+    if (g_remastered_badge_tex) { glDeleteTextures(1, &g_remastered_badge_tex); g_remastered_badge_tex = 0; }
+    g_remastered_badge_ink_w = g_remastered_badge_ink_h = g_remastered_badge_pad = 0;
+    g_remastered_badge_tried = 0;
+    g_bg_is_main_menu = 0;
     if (g_cursor_tex) { glDeleteTextures(1, &g_cursor_tex); g_cursor_tex = 0; }
     if (g_vao && p_glDeleteVertexArrays) { p_glDeleteVertexArrays(1, &g_vao); g_vao = 0; }
     if (g_prog_upscale && p_glDeleteProgram) { p_glDeleteProgram(g_prog_upscale); g_prog_upscale = 0; }
@@ -2476,6 +2488,7 @@ void gl_renderer_set_hd_background(int asset_id, const void *orig_pixels,
     if (!g_gl_active || !pthread_equal(pthread_self(), g_gl_thread)) return;
     if (asset_id < 0 || !orig_pixels || w <= 0 || h <= 0) {
         g_bg_active = 0;
+        g_bg_is_main_menu = 0;
         return;
     }
 
@@ -2484,6 +2497,7 @@ void gl_renderer_set_hd_background(int asset_id, const void *orig_pixels,
         const HdImageRGBA *hd = hd_assets_get_rgba(asset_id);
         if (!hd || !hd->rgba) {
             g_bg_active = 0;
+            g_bg_is_main_menu = 0;
             return;
         }
         glBindTexture(GL_TEXTURE_2D, g_bg_hd_tex);
@@ -2558,6 +2572,8 @@ void gl_renderer_set_hd_background(int asset_id, const void *orig_pixels,
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         g_bg_orig_ptr = orig_pixels;
     }
+    const char *aname = hd_assets_get_name(asset_id);
+    g_bg_is_main_menu = (aname && strncmp(aname, "x/001/", 6) == 0 && strstr(aname, "objBg") != NULL) ? 1 : 0;
     g_bg_dst_x = dst_x;
     g_bg_dst_y = dst_y;
     g_bg_active = 1;
@@ -2565,6 +2581,7 @@ void gl_renderer_set_hd_background(int asset_id, const void *orig_pixels,
 
 void gl_renderer_clear_hd_background(void) {
     g_bg_active = 0;
+    g_bg_is_main_menu = 0;
 }
 
 /* ---- Persistent 4K GPU DirectDraw Canvas Mirror (Exact Painter's Z-Order) ---- */
@@ -2645,12 +2662,480 @@ void gl_canvas_colorfill(int slot, int game_w, int game_h,
     g_hd_canvas_has_draws = 1;
 }
 
+static float badge_clampf(float v, float lo, float hi) {
+    return (v < lo) ? lo : ((v > hi) ? hi : v);
+}
+
+static float badge_smoothstep(float e0, float e1, float x) {
+    float t = badge_clampf((x - e0) / (e1 - e0), 0.0f, 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+static void badge_sample_gold_env(float ev, float *out_r, float *out_g, float *out_b) {
+    static const float pos[6] = { 0.00f, 0.22f, 0.48f, 0.65f, 0.86f, 1.00f };
+    static const float col[6][3] = {
+        { 1.00f, 0.97f, 0.84f },
+        { 0.98f, 0.91f, 0.72f },
+        { 0.88f, 0.76f, 0.52f },
+        { 0.95f, 0.85f, 0.62f },
+        { 0.84f, 0.70f, 0.45f },
+        { 0.66f, 0.52f, 0.28f },
+    };
+    ev = badge_clampf(ev, 0.0f, 1.0f);
+    for (int i = 0; i < 5; i++) {
+        if (ev <= pos[i + 1]) {
+            float t = (ev - pos[i]) / (pos[i + 1] - pos[i]);
+            *out_r = col[i][0] + (col[i + 1][0] - col[i][0]) * t;
+            *out_g = col[i][1] + (col[i + 1][1] - col[i][1]) * t;
+            *out_b = col[i][2] + (col[i + 1][2] - col[i][2]) * t;
+            return;
+        }
+    }
+    *out_r = col[5][0];
+    *out_g = col[5][1];
+    *out_b = col[5][2];
+}
+
+/* Exact O(n) 1D squared Euclidean distance transform (Felzenszwalb-Huttenlocher) */
+static void badge_edt_1d(const float *f, float *d, int n, int *v, double *z) {
+    if (n <= 0) return;
+    int k = 0;
+    v[0] = 0;
+    z[0] = -1e20;
+    z[1] = 1e20;
+    for (int q = 1; q < n; q++) {
+        double fq = (double)f[q];
+        double qq = (double)q * (double)q;
+        double s;
+        for (;;) {
+            int vk = v[k];
+            double fvk = (double)f[vk];
+            double vkvk = (double)vk * (double)vk;
+            s = ((fq + qq) - (fvk + vkvk)) / (2.0 * (double)(q - vk));
+            if (s > z[k] || k == 0) break;
+            k--;
+        }
+        k++;
+        v[k] = q;
+        z[k] = s;
+        z[k + 1] = 1e20;
+    }
+    k = 0;
+    for (int q = 0; q < n; q++) {
+        while (z[k + 1] < (double)q) k++;
+        double dx = (double)q - (double)v[k];
+        d[q] = (float)(dx * dx + (double)f[v[k]]);
+    }
+}
+
+static void badge_edt_2d(float *grid, int w, int h) {
+    int max_dim = (w > h) ? w : h;
+    float *src = (float *)malloc((size_t)max_dim * sizeof(float));
+    float *dst = (float *)malloc((size_t)max_dim * sizeof(float));
+    int   *v   = (int   *)malloc((size_t)max_dim * sizeof(int));
+    double *z  = (double *)malloc((size_t)(max_dim + 1) * sizeof(double));
+    if (!src || !dst || !v || !z) {
+        free(src); free(dst); free(v); free(z);
+        return;
+    }
+
+    for (int x = 0; x < w; x++) {
+        for (int y = 0; y < h; y++) src[y] = grid[y * w + x];
+        badge_edt_1d(src, dst, h, v, z);
+        for (int y = 0; y < h; y++) grid[y * w + x] = dst[y];
+    }
+    for (int y = 0; y < h; y++) {
+        float *row = grid + y * w;
+        memcpy(src, row, (size_t)w * sizeof(float));
+        badge_edt_1d(src, dst, w, v, z);
+        for (int x = 0; x < w; x++) row[x] = sqrtf(fmaxf(0.0f, dst[x]));
+    }
+
+    free(src);
+    free(dst);
+    free(v);
+    free(z);
+}
+
+/* Generate crisp 4K-scale clean-room 3D brushed champagne-gold "REMASTERED" texture
+ * (premultiplied RGBA8) using SDL2_ttf outlines and exact 2D signed distance fields. */
+static uint8_t *build_remastered_badge_rgba(int *out_w, int *out_h,
+                                            int *out_ink_w, int *out_ink_h, int *out_pad) {
+    static const char k_text[] = "REMASTERED";
+    if (!g_game_ttf_path[0]) init_osd_font();
+    const char *fpath = g_game_ttf_path[0] ? g_game_ttf_path : g_ttf_font_path;
+    if (!fpath[0]) return NULL;
+
+    TTF_Font *font = TTF_OpenFont(fpath, 260);
+    if (!font) return NULL;
+    if (!g_game_ttf_is_bold_file) {
+        TTF_SetFontStyle(font, TTF_STYLE_BOLD);
+    }
+
+#ifdef SDL_PIXELFORMAT_RGBA32
+    const Uint32 fmt = SDL_PIXELFORMAT_RGBA32;
+#else
+    const Uint32 fmt = SDL_PIXELFORMAT_ABGR8888;
+#endif
+    SDL_Color white = { 255, 255, 255, 255 };
+    SDL_Surface *gsurf[10];
+    int gx0[10], gx1[10];
+    int gy_min = 0x7fffffff, gy_max = -1;
+    memset(gsurf, 0, sizeof(gsurf));
+
+    int ok = 1;
+    for (int i = 0; i < 10; i++) {
+        char buf[2] = { k_text[i], '\0' };
+        SDL_Surface *raw = TTF_RenderUTF8_Blended(font, buf, white);
+        if (!raw) { ok = 0; break; }
+        SDL_Surface *conv = SDL_ConvertSurfaceFormat(raw, fmt, 0);
+        SDL_FreeSurface(raw);
+        if (!conv) { ok = 0; break; }
+        gsurf[i] = conv;
+
+        int lx0 = conv->w, lx1 = -1;
+        const uint8_t *px = (const uint8_t *)conv->pixels;
+        for (int y = 0; y < conv->h; y++) {
+            const uint8_t *row = px + y * conv->pitch;
+            for (int x = 0; x < conv->w; x++) {
+                if (row[x * 4 + 3] >= 16) {
+                    if (x < lx0) lx0 = x;
+                    if (x > lx1) lx1 = x;
+                    if (y < gy_min) gy_min = y;
+                    if (y > gy_max) gy_max = y;
+                }
+            }
+        }
+        if (lx1 < lx0) { ok = 0; break; }
+        gx0[i] = lx0;
+        gx1[i] = lx1;
+    }
+    TTF_CloseFont(font);
+
+    if (!ok || gy_max < gy_min) {
+        for (int i = 0; i < 10; i++) {
+            if (gsurf[i]) SDL_FreeSurface(gsurf[i]);
+        }
+        return NULL;
+    }
+
+    int ink_h = gy_max - gy_min + 1;
+    int gaps[9];
+    int ink_w = 0;
+    for (int i = 0; i < 10; i++) {
+        ink_w += (gx1[i] - gx0[i] + 1);
+        if (i < 9) {
+            float gf = 0.140f;
+            if (i == 2 || i == 3) gf = 0.105f;       /* M->A, A->S optical tighten */
+            else if (i == 4 || i == 5) gf = 0.110f;  /* S->T, T->E overhang tighten */
+            gaps[i] = (int)roundf((float)ink_h * gf);
+            ink_w += gaps[i];
+        }
+    }
+
+    int pad = (int)roundf((float)ink_h * 0.34f);
+    int tex_w = ink_w + 2 * pad;
+    int tex_h = ink_h + 2 * pad;
+    size_t npix = (size_t)tex_w * (size_t)tex_h;
+
+    float *cov   = (float *)calloc(npix, sizeof(float));
+    float *d_in  = (float *)malloc(npix * sizeof(float));
+    float *d_out = (float *)malloc(npix * sizeof(float));
+    float *hgt   = (float *)malloc(npix * sizeof(float));
+    uint8_t *rgba = (uint8_t *)calloc(npix * 4u, 1u);
+
+    if (!cov || !d_in || !d_out || !hgt || !rgba) {
+        for (int i = 0; i < 10; i++) {
+            if (gsurf[i]) SDL_FreeSurface(gsurf[i]);
+        }
+        free(cov); free(d_in); free(d_out); free(hgt); free(rgba);
+        return NULL;
+    }
+
+    int pen_x = pad;
+    for (int i = 0; i < 10; i++) {
+        SDL_Surface *s = gsurf[i];
+        const uint8_t *px = (const uint8_t *)s->pixels;
+        int sy0 = gy_min - 1; if (sy0 < 0) sy0 = 0;
+        int sy1 = gy_max + 1; if (sy1 >= s->h) sy1 = s->h - 1;
+        int sx0 = gx0[i] - 1; if (sx0 < 0) sx0 = 0;
+        int sx1 = gx1[i] + 1; if (sx1 >= s->w) sx1 = s->w - 1;
+        for (int sy = sy0; sy <= sy1; sy++) {
+            int dy = pad + (sy - gy_min);
+            if (dy < 0 || dy >= tex_h) continue;
+            const uint8_t *row = px + sy * s->pitch;
+            for (int sx = sx0; sx <= sx1; sx++) {
+                int dx = pen_x + (sx - gx0[i]);
+                if (dx < 0 || dx >= tex_w) continue;
+                float a = (float)row[sx * 4 + 3] / 255.0f;
+                size_t di = (size_t)dy * (size_t)tex_w + (size_t)dx;
+                if (a > cov[di]) cov[di] = a;
+            }
+        }
+        pen_x += (gx1[i] - gx0[i] + 1);
+        if (i < 9) pen_x += gaps[i];
+        SDL_FreeSurface(gsurf[i]);
+        gsurf[i] = NULL;
+    }
+
+    for (size_t i = 0; i < npix; i++) {
+        d_in[i]  = (cov[i] < 0.5f)  ? 0.0f : 1e9f;
+        d_out[i] = (cov[i] >= 0.5f) ? 0.0f : 1e9f;
+    }
+    badge_edt_2d(d_in, tex_w, tex_h);
+    badge_edt_2d(d_out, tex_w, tex_h);
+
+    float bw = 0.072f * (float)ink_h;
+    if (bw < 1.0f) bw = 1.0f;
+    for (size_t i = 0; i < npix; i++) {
+        if (cov[i] >= 0.5f) {
+            d_in[i] = fmaxf(0.0f, d_in[i] - 0.5f + (cov[i] - 0.5f));
+            d_out[i] = 0.0f;
+        } else {
+            d_out[i] = fmaxf(0.0f, d_out[i] - 0.5f + (0.5f - cov[i]));
+            d_in[i] = 0.0f;
+        }
+        float u = badge_clampf(d_in[i] / bw, 0.0f, 1.0f);
+        hgt[i] = 1.0f - (1.0f - u) * (1.0f - u);
+    }
+
+    /* Key upper-left light + lower-right warm treasure bounce (pre-normalized) */
+    const float l1x = -0.32f, l1y = -0.82f, l1z = 0.48f;
+    const float l1_len = sqrtf(l1x * l1x + l1y * l1y + l1z * l1z);
+    const float kx = l1x / l1_len, ky = l1y / l1_len, kz = l1z / l1_len;
+    float hx = kx, hy = ky, hz = kz + 1.0f;
+    float h_len = sqrtf(hx * hx + hy * hy + hz * hz);
+    hx /= h_len; hy /= h_len; hz /= h_len;
+
+    const float l2x = 0.25f, l2y = 0.78f, l2z = 0.57f;
+    const float l2_len = sqrtf(l2x * l2x + l2y * l2y + l2z * l2z);
+    const float bx = l2x / l2_len, by = l2y / l2_len, bz = l2z / l2_len;
+
+    const float sigma_g = 0.088f * (float)ink_h;
+    const float sigma_s = 0.070f * (float)ink_h;
+    const float inv_2sg2 = 1.0f / (2.0f * sigma_g * sigma_g);
+    const float inv_2ss2 = 1.0f / (2.0f * sigma_s * sigma_s);
+    const int sh_dx = (int)roundf(0.020f * (float)ink_h);
+    const int sh_dy = (int)roundf(0.048f * (float)ink_h);
+    const float border_w = fmaxf(1.8f, 0.027f * (float)ink_h);
+
+    for (int y = 0; y < tex_h; y++) {
+        int ym = (y > 0) ? (y - 1) : 0;
+        int yp = (y + 1 < tex_h) ? (y + 1) : (tex_h - 1);
+        float ty = badge_clampf((float)(y - pad) / (float)ink_h, 0.0f, 1.0f);
+        /* Fine horizontal brushed-metal texture */
+        float brush = 0.011f * sinf((float)y * 1.45f) + 0.005f * sinf((float)y * 3.7f);
+
+        for (int x = 0; x < tex_w; x++) {
+            size_t idx = (size_t)y * (size_t)tex_w + (size_t)x;
+            float dout = d_out[idx];
+
+            /* Layer 1: Soft warm golden ambient aura (smoothly attenuated before padding edge) */
+            float ga = 0.18f * expf(-(dout * dout) * inv_2sg2);
+            float pr = 1.00f * ga;
+            float pg = 0.78f * ga;
+            float pb = 0.34f * ga;
+            float pa = ga;
+
+            /* Layer 2: Soft offset dark drop shadow */
+            int sx = x - sh_dx; if (sx < 0) sx = 0; else if (sx >= tex_w) sx = tex_w - 1;
+            int sy = y - sh_dy; if (sy < 0) sy = 0; else if (sy >= tex_h) sy = tex_h - 1;
+            float dsh = d_out[(size_t)sy * (size_t)tex_w + (size_t)sx];
+            float sa = 0.84f * expf(-(dsh * dsh) * inv_2ss2);
+            if (sa > 0.001f) {
+                float isa = 1.0f - sa;
+                pr = 0.03f * sa + pr * isa;
+                pg = 0.015f * sa + pg * isa;
+                pb = 0.004f * sa + pb * isa;
+                pa = sa + pa * isa;
+            }
+
+            /* Layer 3: Crisp dark carved bronze outline */
+            float oa = 1.0f - badge_smoothstep(border_w - 0.8f, border_w + 1.0f, dout);
+            if (oa > 0.001f) {
+                float ioa = 1.0f - oa;
+                pr = 0.06f * oa + pr * ioa;
+                pg = 0.035f * oa + pg * ioa;
+                pb = 0.01f * oa + pb * ioa;
+                pa = oa + pa * ioa;
+            }
+
+            /* Layer 4: 3D chiseled brushed champagne-gold interior */
+            float ca = cov[idx];
+            if (ca > 0.001f) {
+                int xm = (x > 0) ? (x - 1) : 0;
+                int xp = (x + 1 < tex_w) ? (x + 1) : (tex_w - 1);
+                float gx = 0.5f * (hgt[(size_t)y * (size_t)tex_w + (size_t)xp] -
+                                   hgt[(size_t)y * (size_t)tex_w + (size_t)xm]);
+                float gy = 0.5f * (hgt[(size_t)yp * (size_t)tex_w + (size_t)x] -
+                                   hgt[(size_t)ym * (size_t)tex_w + (size_t)x]);
+                float nx = -gx * 2.6f, ny = -gy * 2.6f, nz = 1.0f;
+                float nlen = sqrtf(nx * nx + ny * ny + nz * nz);
+                nx /= nlen; ny /= nlen; nz /= nlen;
+
+                float tx = badge_clampf((float)(x - pad) / (float)ink_w, 0.0f, 1.0f);
+                float ev = badge_clampf(ty + ny * 0.34f + nx * 0.08f, 0.0f, 1.0f);
+                float mr = 0.0f, mg = 0.0f, mb = 0.0f;
+                badge_sample_gold_env(ev, &mr, &mg, &mb);
+
+                float diag = 0.97f + 0.06f * cosf((tx * 0.85f + ty * 0.35f - 0.55f) * 3.14159f);
+                float mod = diag + brush;
+                mr *= mod; mg *= mod; mb *= mod;
+
+                float diff1 = fmaxf(0.0f, nx * kx + ny * ky + nz * kz);
+                float spec1 = powf(fmaxf(0.0f, nx * hx + ny * hy + nz * hz), 24.0f);
+                float diff2 = fmaxf(0.0f, nx * bx + ny * by + nz * bz);
+
+                float rim_mask = 1.0f - nz * nz; /* emphasizes beveled chamfers vs flat face */
+                float lift = 0.92f + 0.16f * diff1;
+                mr = mr * lift + 0.50f * spec1 * 1.00f + 0.16f * diff2 * rim_mask * 0.98f;
+                mg = mg * lift + 0.50f * spec1 * 0.97f + 0.16f * diff2 * rim_mask * 0.80f;
+                mb = mb * lift + 0.50f * spec1 * 0.88f + 0.16f * diff2 * rim_mask * 0.42f;
+
+                /* Subtle bevel crest catchlight near outer edge */
+                float crease = 1.0f - badge_smoothstep(0.0f, 1.8f, d_in[idx]);
+                mr = mr * (1.0f - 0.20f * crease) + 0.20f * crease * 0.35f;
+                mg = mg * (1.0f - 0.20f * crease) + 0.20f * crease * 0.26f;
+                mb = mb * (1.0f - 0.20f * crease) + 0.20f * crease * 0.12f;
+
+                mr = badge_clampf(mr, 0.0f, 1.0f);
+                mg = badge_clampf(mg, 0.0f, 1.0f);
+                mb = badge_clampf(mb, 0.0f, 1.0f);
+
+                float ica = 1.0f - ca;
+                pr = mr * ca + pr * ica;
+                pg = mg * ca + pg * ica;
+                pb = mb * ca + pb * ica;
+                pa = ca + pa * ica;
+            }
+
+            /* Wide smooth border fade over half of padding so zero rectangular halo edge is visible */
+            int ex = x < (tex_w - 1 - x) ? x : (tex_w - 1 - x);
+            int ey = y < (tex_h - 1 - y) ? y : (tex_h - 1 - y);
+            int em = ex < ey ? ex : ey;
+            float fade_end = fmaxf(8.0f, (float)pad * 0.45f);
+            if ((float)em < fade_end) {
+                float ef = badge_smoothstep(2.0f, fade_end, (float)em);
+                pr *= ef; pg *= ef; pb *= ef; pa *= ef;
+            }
+
+            int r8 = (int)roundf(badge_clampf(pr, 0.0f, 1.0f) * 255.0f);
+            int g8 = (int)roundf(badge_clampf(pg, 0.0f, 1.0f) * 255.0f);
+            int b8 = (int)roundf(badge_clampf(pb, 0.0f, 1.0f) * 255.0f);
+            int a8 = (int)roundf(badge_clampf(pa, 0.0f, 1.0f) * 255.0f);
+            rgba[idx * 4u + 0u] = (uint8_t)r8;
+            rgba[idx * 4u + 1u] = (uint8_t)g8;
+            rgba[idx * 4u + 2u] = (uint8_t)b8;
+            rgba[idx * 4u + 3u] = (uint8_t)a8;
+        }
+    }
+
+    free(cov);
+    free(d_in);
+    free(d_out);
+    free(hgt);
+
+    *out_w = tex_w;
+    *out_h = tex_h;
+    *out_ink_w = ink_w;
+    *out_ink_h = ink_h;
+    *out_pad = pad;
+    return rgba;
+}
+
+static void ensure_remastered_badge_tex(void) {
+    if (g_remastered_badge_tex || g_remastered_badge_tried) return;
+    g_remastered_badge_tried = 1;
+
+    int tw = 0, th = 0, iw = 0, ih = 0, pad = 0;
+    uint8_t *rgba = build_remastered_badge_rgba(&tw, &th, &iw, &ih, &pad);
+    if (!rgba) return;
+
+    glGenTextures(1, &g_remastered_badge_tex);
+    glBindTexture(GL_TEXTURE_2D, g_remastered_badge_tex);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    p_glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    free(rgba);
+
+    g_remastered_badge_ink_w = iw;
+    g_remastered_badge_ink_h = ih;
+    g_remastered_badge_pad = pad;
+}
+
+static void get_remastered_badge_game_rect(float *qx0, float *qy0, float *qx1, float *qy1) {
+    float target_ink_h = 52.0f;
+    float target_ink_w = target_ink_h * ((float)g_remastered_badge_ink_w / (float)g_remastered_badge_ink_h);
+    if (target_ink_w > 504.0f) {
+        float sc = 504.0f / target_ink_w;
+        target_ink_w = 504.0f;
+        target_ink_h *= sc;
+    }
+    float pad_g = target_ink_h * ((float)g_remastered_badge_pad / (float)g_remastered_badge_ink_h);
+    const float cx = 400.0f;
+    const float cy = 472.5f;
+    *qx0 = cx - target_ink_w * 0.5f - pad_g;
+    *qx1 = cx + target_ink_w * 0.5f + pad_g;
+    *qy0 = cy - target_ink_h * 0.5f - pad_g;
+    *qy1 = cy + target_ink_h * 0.5f + pad_g;
+}
+
 void gl_canvas_blit_hd_bg(int slot, int game_w, int game_h,
                           int dx0, int dy0, int dx1, int dy1,
                           float u0, float v0, float u1, float v1) {
     if (!g_bg_active || !g_bg_hd_tex) return;
     canvas_draw_tex_quad(slot, game_w, game_h, g_bg_hd_tex,
                          dx0, dy0, dx1, dy1, u0, v0, u1, v1, 0, 1.0f);
+
+    if (g_bg_is_main_menu && game_w == 800 && game_h == 600 &&
+        g_gl_active && pthread_equal(pthread_self(), g_gl_thread) &&
+        ensure_hd_canvas_fbos(game_w, game_h)) {
+        ensure_remastered_badge_tex();
+        if (g_remastered_badge_tex) {
+            float qx0, qy0, qx1, qy1;
+            get_remastered_badge_game_rect(&qx0, &qy0, &qx1, &qy1);
+            if ((float)dx1 > qx0 && (float)dx0 < qx1 && (float)dy1 > qy0 && (float)dy0 < qy1) {
+                int scx0 = dx0 < 0 ? 0 : dx0;
+                int scy0 = dy0 < 0 ? 0 : dy0;
+                int scx1 = dx1 > g_hd_canvas_gw ? g_hd_canvas_gw : dx1;
+                int scy1 = dy1 > g_hd_canvas_gh ? g_hd_canvas_gh : dy1;
+                if (scx1 > scx0 && scy1 > scy0) {
+                    float x0 = (2.0f * qx0 / (float)g_hd_canvas_gw) - 1.0f;
+                    float x1 = (2.0f * qx1 / (float)g_hd_canvas_gw) - 1.0f;
+                    float y0 = (2.0f * qy0 / (float)g_hd_canvas_gh) - 1.0f;
+                    float y1 = (2.0f * qy1 / (float)g_hd_canvas_gh) - 1.0f;
+
+                    p_glBindFramebuffer(GL_FRAMEBUFFER, g_hd_canvas_fbo[slot & 1]);
+                    glViewport(0, 0, g_hd_canvas_tw, g_hd_canvas_th);
+                    glEnable(GL_SCISSOR_TEST);
+                    glScissor(scx0 * HD_CANVAS_SCALE, scy0 * HD_CANVAS_SCALE,
+                              (scx1 - scx0) * HD_CANVAS_SCALE, (scy1 - scy0) * HD_CANVAS_SCALE);
+                    glEnable(GL_BLEND);
+                    p_glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+
+                    p_glUseProgram(g_prog_osd);
+                    p_glActiveTexture(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_2D, g_remastered_badge_tex);
+                    p_glUniform1i(p_glGetUniformLocation(g_prog_osd, "uTex"), 0);
+                    p_glUniform4f(p_glGetUniformLocation(g_prog_osd, "uRect"), x0, y0, x1, y1);
+                    p_glUniform4f(p_glGetUniformLocation(g_prog_osd, "uUVRect"), 0.0f, 0.0f, 1.0f, 1.0f);
+                    p_glUniform1f(p_glGetUniformLocation(g_prog_osd, "uAlpha"), 1.0f);
+                    p_glUniform1f(p_glGetUniformLocation(g_prog_osd, "uSoftEdge"), 0.0f);
+                    p_glBindVertexArray(g_vao);
+                    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+                    glDisable(GL_BLEND);
+                    glDisable(GL_SCISSOR_TEST);
+                    p_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                }
+            }
+        }
+    }
 }
 
 void gl_canvas_blit_hd_sprite(int slot, int game_w, int game_h, int sprite_id,
@@ -3238,6 +3723,34 @@ static void gl_draw_frame_common(int src_w, int src_h, int src_bpp) {
 
     p_glBindVertexArray(g_vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    /* Classic / non-HD-canvas fallback: composite clean-room "REMASTERED" onto Main Menu scene */
+    if (!use_hd_canvas && !is_video && src_w == 800 && src_h == 600 && layout == LAYOUT_4_3 &&
+        (game_is_main_menu_active() || (use_hd_bg && g_bg_is_main_menu))) {
+        ensure_remastered_badge_tex();
+        if (g_remastered_badge_tex) {
+            float qx0, qy0, qx1, qy1;
+            get_remastered_badge_game_rect(&qx0, &qy0, &qx1, &qy1);
+            float x0 = (2.0f * qx0 / 800.0f) - 1.0f;
+            float x1 = (2.0f * qx1 / 800.0f) - 1.0f;
+            float y0 = 1.0f - (2.0f * qy0 / 600.0f);
+            float y1 = 1.0f - (2.0f * qy1 / 600.0f);
+
+            glEnable(GL_BLEND);
+            p_glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+            p_glUseProgram(g_prog_osd);
+            p_glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, g_remastered_badge_tex);
+            p_glUniform1i(p_glGetUniformLocation(g_prog_osd, "uTex"), 0);
+            p_glUniform4f(p_glGetUniformLocation(g_prog_osd, "uRect"), x0, y0, x1, y1);
+            p_glUniform4f(p_glGetUniformLocation(g_prog_osd, "uUVRect"), 0.0f, 0.0f, 1.0f, 1.0f);
+            p_glUniform1f(p_glGetUniformLocation(g_prog_osd, "uAlpha"), 1.0f);
+            p_glUniform1f(p_glGetUniformLocation(g_prog_osd, "uSoftEdge"), 0.0f);
+            p_glBindVertexArray(g_vao);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            glDisable(GL_BLEND);
+        }
+    }
 
     if (use_post_pipe) {
         g_scene_has_rendered = 1;

@@ -674,3 +674,20 @@ int game_collect_room_hotspots(GameHotspot *out, int max_out) {
     hs_walk_container(&ctx, scroll_root, sr_x, sr_y, 0);
     return ctx.count;
 }
+
+int game_is_main_menu_active(void) {
+    if (!g_mem || win32_avi_is_playing()) return 0;
+    uint32_t mg = mem_r32(0x00527850u);
+    if (!hs_va_ok(mg, 0x100u) || mem_r8(mg + 0x00bcu) != 0u) return 0;
+    uint32_t scene = mem_r32(mg + 0xc0u);
+    if (!hs_va_ok(scene, 0x30u)) return 0;
+    if (scene != mem_r32(mg + 0xccu) || mem_r32(scene) != 0x00505504u) return 0;
+    if (mem_r32(scene + 0x24u) != 0x00010100u) return 0;
+    uint32_t rd = mem_r32(scene + 0x1cu);
+    if (!hs_va_ok(rd, 0x40u)) return 0;
+    if (mem_r8(rd + 0x28u) == 0u || mem_r8(rd + 0x35u) != 0u ||
+        (mem_r32(rd + 0x38u) & 1u) == 0u) {
+        return 0;
+    }
+    return 1;
+}

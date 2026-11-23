@@ -31,9 +31,10 @@ RUN curl -fsSL https://ffmpeg.org/releases/ffmpeg-6.1.2.tar.xz -o /tmp/ffmpeg.ta
        --disable-autodetect --disable-everything \
        --enable-pthreads --enable-zlib \
        --enable-protocol=file \
-       --enable-demuxer=mov,avi,matroska \
-       --enable-parser=h264,mpegvideo,mpeg4video,mjpeg \
-       --enable-decoder=h264,mpeg1video,mpeg2video,mpeg4,cinepak,mjpeg,msvideo1,indeo3,indeo5,rawvideo,pcm_s16le,pcm_u8,mp3,aac \
+       --enable-demuxer=mov,avi,matroska,image2,webp_pipe,png_pipe,jpeg_pipe,bmp_pipe \
+       --enable-parser=h264,mpegvideo,mpeg4video,mjpeg,webp,png,bmp \
+       --enable-decoder=h264,mpeg1video,mpeg2video,mpeg4,cinepak,mjpeg,msvideo1,indeo3,indeo5,rawvideo,pcm_s16le,pcm_u8,mp3,aac,webp,png,bmp \
+       --enable-encoder=png \
        --enable-swscale \
   && make -j"$(nproc)" \
   && make install \
