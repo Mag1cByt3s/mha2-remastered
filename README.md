@@ -6,6 +6,8 @@
   <strong>🇩🇪 Deutsch</strong> · <a href="#english">🇬🇧 English</a>
 </p>
 
+<br>
+
 # Moorhuhn Adventure 2: Der Fluch des Goldes — Native Linux Remastered Engine (v5)
 
 Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** sowie eine **modernisierte OpenGL-3.3-Core-Remaster-Engine** für *Moorhuhn Adventure 2: Der Fluch des Goldes* (`mha2.exe`) — nativ portiert auf Linux mit **OpenGL 3.3 Core**, **SDL2**, **SDL2_ttf** und **FFmpeg**, ganz **ohne Wine, ohne Emulator, ohne Windows-DLLs und ohne Ghidra zur Build-Zeit**.
@@ -14,23 +16,37 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
 >
 > Siehe [CHANGELOG.md](CHANGELOG.md) für den vollständigen Versionsverlauf von `v1` (erste statische Rekompilierung) bis `v5.3`.
 
+<br>
+
 ---
 
+<br>
+
 ## Showcase (Original 2005 vs. 4K-Remaster v5)
+
+<br>
 
 ### Splitscreen-Vergleich — Schlossgang (2005 `800×450` vs. Live-4K-Remaster)
 
 ![Original 2005 vs. 4K-Remaster v5 Splitscreen](docs/images/remaster_showcase_split.png)
 
+<br>
+
 ### Direktvergleich & 1:1-Native-4K-Detailzooms
 
 ![Original 2005 vs. 4K-Remaster v5 Detailvergleich](docs/images/remaster_showcase_comparison.png)
+
+<br>
 
 ### Ingame-4K-Nahaufnahme & interaktiver Hotspot-Highlighter (`Leertaste` / `H`)
 
 ![4K-Remaster v5 Standuhr-Nahaufnahme mit Hotspot-Highlighter](docs/images/remaster_showcase_clock_hotspots.png)
 
+<br>
+
 ---
+
+<br>
 
 ## Modernisierte Engine-Features (v5)
 
@@ -65,9 +81,15 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
 - **Remastered FMV-Zwischensequenzen** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/upscale_videos.py](tools/upscale_videos.py)):
   - Echtzeit-GPU-Deblocking, Anti-Ringing und Schärfung für die 2005er Cinepak-AVIs sowie automatische lippensynchrone Wiedergabe optionaler HD-MP4/MKV-Cutscenes aus `hd_assets/videos/`.
 
+<br>
+
 ---
 
+<br>
+
 ## Kompilieren aus deiner eigenen legalen Spielkopie
+
+<br>
 
 ### NixOS (`nix-shell`)
 
@@ -82,6 +104,8 @@ nix-shell --run "make lift && make -j$(nproc)"
 # 3. Spielen!
 ./play.sh
 ```
+
+<br>
 
 ### Standard-Linux (Ubuntu / Debian / Fedora / Arch)
 
@@ -101,6 +125,8 @@ make lift && make -j"$(nproc)"
 ./mha2_linux
 ```
 
+<br>
+
 ### Portables Linux-Release-Bundle
 
 Erstellt ein eigenständiges, distributionsübergreifendes `.tar.gz`-Bundle über den Ubuntu-22.04-Builder-Container (`glibc 2.35`, `podman` oder `docker`):
@@ -110,7 +136,11 @@ make lift
 bash tools/package_portable_linux.sh
 ```
 
+<br>
+
 ---
+
+<br>
 
 ## 4K-KI-HD-Asset-Pack erstellen (`hd_assets/`)
 
@@ -126,7 +156,11 @@ nix-shell --run "python3 tools/extract_assets.py --list"
 nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ```
 
+<br>
+
 ---
+
+<br>
 
 ## Starten & CLI-Optionen
 
@@ -136,6 +170,8 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ./play.sh --aspect 16:10 --grade remastered     # 16:10-Smart-Widescreen & Color Grading erzwingen
 ./play.sh --16bit --no-hd-assets --no-hd-sprites --no-hd-text --no-bloom --grade original  # Purer 2005er-Look
 ```
+
+<br>
 
 ### Tastenkürzel im Spiel
 
@@ -157,7 +193,11 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Strg+P** oder **Druck** | Sauberen 4K-PNG-Screenshot speichern (`screenshots/`) |
 | **ESC** | Zwischensequenzen überspringen / Spielmenü / F1-Menü schließen |
 
+<br>
+
 ---
+
+<br>
 
 ## Lizenz
 
@@ -175,6 +215,8 @@ Der Clean-Room-Static-Recompiler, die native Linux-Laufzeitumgebung und alle Ass
   <a href="#deutsch">🇩🇪 Deutsch</a> · <strong>🇬🇧 English</strong>
 </p>
 
+<br>
+
 # Moorhuhn Adventure 2: Der Fluch des Goldes — Native Linux Remastered Engine (v5)
 
 A full **standalone x86-32 to native Linux x86_64 static recompiler** and **modernized OpenGL 3.3 Core remaster engine** for *Moorhuhn Adventure 2: Der Fluch des Goldes* (`mha2.exe`), ported natively to Linux with **OpenGL 3.3 Core**, **SDL2**, **SDL2_ttf**, and **FFmpeg** — with **no Wine, no emulator, no Windows DLLs, and no Ghidra required at build time**.
@@ -183,23 +225,37 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
 >
 > See [CHANGELOG.md](CHANGELOG.md) for the full version history from `v1` static recompilation through `v5.3`.
 
+<br>
+
 ---
 
+<br>
+
 ## Showcase (Original 2005 vs 4K Remaster v5)
+
+<br>
 
 ### Split-Screen Comparison — Castle Hallway (2005 `800×450` vs Live 4K Remaster)
 
 ![Original 2005 vs 4K Remaster v5 Split-Screen](docs/images/remaster_showcase_split.png)
 
+<br>
+
 ### Side-by-Side & 1:1 Native 4K Detail Zooms
 
 ![Original 2005 vs 4K Remaster v5 Detail Comparison](docs/images/remaster_showcase_comparison.png)
+
+<br>
 
 ### In-Game 4K Close-Up & Interactive Hotspot Highlighter (`Space` / `H`)
 
 ![4K Remaster v5 Clock Close-Up with Hotspot Highlighter](docs/images/remaster_showcase_clock_hotspots.png)
 
+<br>
+
 ---
+
+<br>
 
 ## Modernized Engine Features (v5)
 
@@ -234,9 +290,15 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
 - **Remastered FMV Cutscenes** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/upscale_videos.py](tools/upscale_videos.py)):
   - Real-time GPU deblocking + anti-ringing + sharpening for 2005 Cinepak AVIs, plus automatic drop-in HD MP4/MKV cutscene playback from `hd_assets/videos/` in full audio sync.
 
+<br>
+
 ---
 
+<br>
+
 ## Building From Your Own Legal Copy
+
+<br>
 
 ### NixOS (`nix-shell`)
 
@@ -251,6 +313,8 @@ nix-shell --run "make lift && make -j$(nproc)"
 # 3. Play!
 ./play.sh
 ```
+
+<br>
 
 ### Standard Linux (Ubuntu / Debian / Fedora / Arch)
 
@@ -270,6 +334,8 @@ make lift && make -j"$(nproc)"
 ./mha2_linux
 ```
 
+<br>
+
 ### Portable Linux Release Bundle
 
 To package a self-contained portable x86_64 `.tar.gz` bundle using the Ubuntu 22.04 (`glibc 2.35`) builder container (`podman` or `docker`):
@@ -279,7 +345,11 @@ make lift
 bash tools/package_portable_linux.sh
 ```
 
+<br>
+
 ---
+
+<br>
 
 ## Building the 4K AI Neural HD Pack (`hd_assets/`)
 
@@ -295,7 +365,11 @@ nix-shell --run "python3 tools/extract_assets.py --list"
 nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ```
 
+<br>
+
 ---
+
+<br>
 
 ## Launching & CLI Options
 
@@ -305,6 +379,8 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ./play.sh --aspect 16:10 --grade remastered     # Force 16:10 Smart widescreen & color grading
 ./play.sh --16bit --no-hd-assets --no-hd-sprites --no-hd-text --no-bloom --grade original  # Pure 2005 look
 ```
+
+<br>
 
 ### In-Game Hotkeys
 
@@ -326,7 +402,11 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Ctrl + P** or **PrintScreen** | Save clean 4K PNG screenshot (`screenshots/`) |
 | **ESC** | Skip cutscenes / open game menu / close F1 menu |
 
+<br>
+
 ---
+
+<br>
 
 ## License
 
