@@ -1,6 +1,7 @@
 ![Moorhuhn Adventure 2: Der Fluch des Goldes — Remastered](docs/images/banner.png)
 
 <a id="deutsch"></a>
+
 <p align="center">
   <strong>🇩🇪 Deutsch</strong> · <a href="#english">🇬🇧 English</a>
 </p>
@@ -13,42 +14,58 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
 >
 > Siehe [CHANGELOG.md](CHANGELOG.md) für den vollständigen Versionsverlauf von `v1` (erste statische Rekompilierung) bis `v5.3`.
 
+---
+
 ## Showcase (Original 2005 vs. 4K-Remaster v5)
 
 ### Splitscreen-Vergleich — Schlossgang (2005 `800×450` vs. Live-4K-Remaster)
+
 ![Original 2005 vs. 4K-Remaster v5 Splitscreen](docs/images/remaster_showcase_split.png)
 
 ### Direktvergleich & 1:1-Native-4K-Detailzooms
+
 ![Original 2005 vs. 4K-Remaster v5 Detailvergleich](docs/images/remaster_showcase_comparison.png)
 
 ### Ingame-4K-Nahaufnahme & interaktiver Hotspot-Highlighter (`Leertaste` / `H`)
+
 ![4K-Remaster v5 Standuhr-Nahaufnahme mit Hotspot-Highlighter](docs/images/remaster_showcase_clock_hotspots.png)
+
+---
 
 ## Modernisierte Engine-Features (v5)
 
 - **100 % eigenständiger Static Recompiler** ([recomp/lift.py](recomp/lift.py)):
   - Erkennt automatisch alle 8.100+ Funktionen, 121 MSVC-Switch-Tabellen (inklusive negativ indizierter und 1-basierter `memcpy`/`memmove`-Tabellen) sowie alle MSVC-C++-EH-`FuncInfo`-Unwind/Catch-Handler direkt aus deiner bereitgestellten `mha2.exe` mit **null Lift-Fehlern** und ohne Ghidra-Abhängigkeit.
   - Enthält einen eigenständigen Extraktor für legale Spielkopien ([tools/extract_game.py](tools/extract_game.py)) mit Unterstützung für Wise `Setup.EXE` und Mode-1/2352-CD-ROM-Images (`.bin`/`.iso`) inklusive vollständiger CRC-32-Prüfung.
+
 - **Unverzerrtes echtes Widescreen (`16:10` & `16:9`) + Ambient-Blur-4:3-Sidebars (`F12`)**:
   - Erkennt automatisch native `800×450`-Spielräume/-Minispiele (16:9) gegenüber `800×600`-Menüs (4:3).
   - **16:10 Smart (`800×500` → exakte `3,2×`-Skalierung auf `2560×1600`, 0 % Streckung, 0 px schwarze Balken)**: voller `800×450`-Raum + dediziertes `50 px` Inventar-Dock unten mit sanft schattierten HUD-Overlays oben.
   - **16:9 Cinema (`800×450`)**: randloses 16:9-Gameplay mit transparenten On-Demand-Overlays oben & unten.
   - **4:3-Menüs**: seitenverhältnistreue Darstellung mit optionalen weichgezeichneten Ambient-Sidebars.
+
 - **Interaktives 3-Tab-Grafik- & Remaster-FX-Menü im Spiel (`F1`) + Auto-Save (`mha2_settings.ini`)**:
   - Per Maus und Tastatur bedienbares 3-Tab-Menü (`1. Display & Scaling`, `2. Remaster FX & AA`, `3. Assets, HUD & Audio`) für Auflösungs-Presets (`800×600`–`2560×1600`), Seitenverhältnis, Shader, Bloom, Color Grading, Silhouetten-AA, Vignette, Szenenübergänge, HD-Assets sowie Lautstärke/Hall/EQ — automatisch gespeichert in `mha2_settings.ini`.
+
 - **Multi-Pass OpenGL 3.3 FBO Post-Processing & weiche Szenen-Überblendungen**:
   - **Emissiver Bloom** (`Off / Subtle / Medium / Rich`): Viertelauflösungs-`GL_RGBA16F`-Bright-Pass + zweifacher separabler 9-Tap-Gauß-Blur für Kerzen, Fackeln, Kronleuchter und Goldartefakte.
   - **Color Grading & Vibrance** (`Original / Remastered Rich / Cinematic Warm / Crisp Daylight`).
   - **Sprite-Silhouetten-AA & Anti-Banding-Dithering**: leichtes FXAA-Kantenglätten + Dreiecksrauschen-Dithering gegen Banding.
   - **Weiche 210 ms Cubic-Ease-Out-Raumblenden**: Zero-Copy-Dual-FBO-Übergänge zwischen Räumen und Menüs.
+
 - **KI-4K-Hintergründe + native GPU-4×-RGBA-Sprites (`F6`)** ([runtime/hd_assets.c](runtime/hd_assets.c), [tools/upscale_ai.py](tools/upscale_ai.py)):
   - Kombiniert 4K-Hintergründe (`3200×1800` / `3200×2400`) sowohl für Menüs (`800×600`) als auch für Spielräume (`800×450`) mit einem O(1)-dimensionsgruppierten LRU-GPU-Renderer für 4×-RGBA-Charaktere, Requisiten, Inventarsymbole, Buttons und Cursor (`hd_assets/sprites/`), inkl. Festplatten-Indexcache für sofortigen Start.
+
 - **Monitor-DPI-Vektortext & Untertitel (`F5`)** & **High-Refresh-Cursor (`F10`)**:
   - Gestochen scharfer TrueType-Vektortext in nativer Monitor-Auflösung (nach dem Post-FX gerendert) sowie ein entkoppelter 4×-HD-Cursor mit voller Monitor-Bildwiederholrate (120/144/240 Hz).
+
 - **Echte 32-Bit-Farbtiefe (`Mode 888`), 7 Upscaling-Shader (inkl. AMD FidelityFX FSR 1.0) & 48-kHz-Audio-Mixer**:
   - Bicubic+CAS, Lanczos3+CAS, Edge-Smooth, Bilinear, Nearest, Subtle CRT und AMD FidelityFX FSR 1.0 (`EASU + RCAS`); Float32-48-kHz-Catmull-Rom-Mixer mit Hall und Mastering-EQ (`F7`/`F8`/`F9`).
+
 - **Remastered FMV-Zwischensequenzen** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/upscale_videos.py](tools/upscale_videos.py)):
   - Echtzeit-GPU-Deblocking, Anti-Ringing und Schärfung für die 2005er Cinepak-AVIs sowie automatische lippensynchrone Wiedergabe optionaler HD-MP4/MKV-Cutscenes aus `hd_assets/videos/`.
+
+---
 
 ## Kompilieren aus deiner eigenen legalen Spielkopie
 
@@ -69,6 +86,7 @@ nix-shell --run "make lift && make -j$(nproc)"
 ### Standard-Linux (Ubuntu / Debian / Fedora / Arch)
 
 Benötigte Build-Abhängigkeiten installieren:
+
 - **Compiler & Build-Tools:** `gcc`, `make`, `pkg-config`, `python3`, `python3-capstone`
 - **Entwicklungs-Header:** `SDL2` (`libsdl2-dev`), `SDL2_ttf` (`libsdl2-ttf-dev`), `FFmpeg` (`libavformat-dev`, `libavcodec-dev`, `libswscale-dev`, `libavutil-dev`) und `OpenGL` (`libgl-dev`)
 
@@ -92,6 +110,8 @@ make lift
 bash tools/package_portable_linux.sh
 ```
 
+---
+
 ## 4K-KI-HD-Asset-Pack erstellen (`hd_assets/`)
 
 ```bash
@@ -106,6 +126,8 @@ nix-shell --run "python3 tools/extract_assets.py --list"
 nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ```
 
+---
+
 ## Starten & CLI-Optionen
 
 ```bash
@@ -116,6 +138,7 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ```
 
 ### Tastenkürzel im Spiel
+
 | Taste | Aktion |
 |---|---|
 | **F1** | Interaktives 3-Tab-Display-, Post-FX- & Audio-Menü öffnen/schließen |
@@ -134,13 +157,20 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Strg+P** oder **Druck** | Sauberen 4K-PNG-Screenshot speichern (`screenshots/`) |
 | **ESC** | Zwischensequenzen überspringen / Spielmenü / F1-Menü schließen |
 
+---
+
 ## Lizenz
 
 Der Clean-Room-Static-Recompiler, die native Linux-Laufzeitumgebung und alle Asset-Tools in diesem Repository stehen unter der **MIT-Lizenz** — Details siehe [LICENSE](LICENSE). Original-Spieldateien, Grafiken, Tonspuren und Videos bleiben Eigentum der jeweiligen Rechteinhaber und sind nicht Teil dieses Repositories.
 
+<br>
+
 ---
 
+<br>
+
 <a id="english"></a>
+
 <p align="center">
   <a href="#deutsch">🇩🇪 Deutsch</a> · <strong>🇬🇧 English</strong>
 </p>
@@ -153,42 +183,58 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
 >
 > See [CHANGELOG.md](CHANGELOG.md) for the full version history from `v1` static recompilation through `v5.3`.
 
+---
+
 ## Showcase (Original 2005 vs 4K Remaster v5)
 
 ### Split-Screen Comparison — Castle Hallway (2005 `800×450` vs Live 4K Remaster)
+
 ![Original 2005 vs 4K Remaster v5 Split-Screen](docs/images/remaster_showcase_split.png)
 
 ### Side-by-Side & 1:1 Native 4K Detail Zooms
+
 ![Original 2005 vs 4K Remaster v5 Detail Comparison](docs/images/remaster_showcase_comparison.png)
 
 ### In-Game 4K Close-Up & Interactive Hotspot Highlighter (`Space` / `H`)
+
 ![4K Remaster v5 Clock Close-Up with Hotspot Highlighter](docs/images/remaster_showcase_clock_hotspots.png)
+
+---
 
 ## Modernized Engine Features (v5)
 
 - **100% Standalone Static Recompiler** ([recomp/lift.py](recomp/lift.py)):
   - Automatically discovers all 8,100+ functions, 121 MSVC switch tables (including negative-indexed and 1-based `memcpy`/`memmove` tables), and all MSVC C++ EH `FuncInfo` unwind/catch handlers directly from a user-supplied `mha2.exe` with **zero lift errors** and zero Ghidra dependency.
   - Includes a standalone legal-copy disc/installer extractor ([tools/extract_game.py](tools/extract_game.py)) supporting both Wise `Setup.EXE` and raw Mode 1/2352 `.bin`/`.iso` CD-ROM images with full CRC-32 verification.
+
 - **Zero-Stretch True Widescreen (`16:10` & `16:9`) + Ambient Blur 4:3 Sidebars (`F12`)**:
   - Automatically detects native `800×450` (16:9) gameplay rooms/minigames vs `800×600` (4:3) menus.
   - **16:10 Smart (`800×500` → exact `3.2×` on `2560×1600`, 0% stretch, 0px black bars)**: full `800×450` room + dedicated `50px` bottom inventory dock with soft drop-shadow top HUD overlays.
   - **16:9 Cinema (`800×450`)**: edge-to-edge 16:9 gameplay with transparent on-demand top & bottom overlays.
   - **4:3 Menus**: aspect-correct with optional blurred ambient sidebars.
+
 - **Interactive 3-Tab In-Game Graphics & Remaster FX Menu (`F1`) + Auto-Save (`mha2_settings.ini`)**:
   - Mouse + keyboard 3-tab menu (`1. Display & Scaling`, `2. Remaster FX & AA`, `3. Assets, HUD & Audio`) controlling resolution presets (`800×600`–`2560×1600`), aspect mode, shaders, bloom, color grading, silhouette AA, vignette, transitions, HD assets, and volume/reverb/EQ — automatically saved to `mha2_settings.ini`.
+
 - **Multi-Pass OpenGL 3.3 FBO Post-Processing & Smooth Scene Crossfades**:
   - **Emissive Bloom** (`Off / Subtle / Medium / Rich`): quarter-res `GL_RGBA16F` warm-weighted bright-pass + dual separable 9-tap Gaussian blur for candles, torches, chandeliers, and gold artifacts.
   - **Color Grading & Vibrance** (`Original / Remastered Rich / Cinematic Warm / Crisp Daylight`).
   - **Sprite Silhouette AA & Anti-Banding Dithering**: lightweight FXAA edge smoothing + triangular-noise output dithering.
   - **Smooth 210 ms Cubic Ease-Out Room Crossfades**: zero-copy dual-FBO transitions between rooms and menus.
+
 - **AI 4K Neural Backgrounds + Native GPU 4× RGBA Sprites (`F6`)** ([runtime/hd_assets.c](runtime/hd_assets.c), [tools/upscale_ai.py](tools/upscale_ai.py)):
   - Composites 4K (`3200×1800` / `3200×2400`) Real-ESRGAN backgrounds for both menus (`800×600`) and gameplay rooms (`800×450`), plus an O(1) dimension-bucketed LRU GPU renderer for 4× RGBA foreground characters, props, inventory icons, buttons, and cursors (`hd_assets/sprites/`), all cached to disk for instant startup.
+
 - **Native Monitor-DPI Vector Text & Subtitles (`F5`)** & **High-Refresh Decoupled Cursor (`F10`)**:
   - Crisp native monitor-DPI TrueType text rendered post-FX, plus a 4× HD decoupled cursor rendered at full monitor refresh rate (120/144/240Hz).
+
 - **True 32-bit Color (`Mode 888`), 7 Upscaling Shaders (incl. AMD FidelityFX FSR 1.0), & 48 kHz Cubic Audio Mixer**:
   - Bicubic+CAS, Lanczos3+CAS, Edge-Smooth, Bilinear, Nearest, Subtle CRT, and AMD FidelityFX FSR 1.0 (`EASU + RCAS`); Float32 48 kHz Catmull-Rom audio mixer with reverb and mastering EQ (`F7`/`F8`/`F9`).
+
 - **Remastered FMV Cutscenes** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/upscale_videos.py](tools/upscale_videos.py)):
   - Real-time GPU deblocking + anti-ringing + sharpening for 2005 Cinepak AVIs, plus automatic drop-in HD MP4/MKV cutscene playback from `hd_assets/videos/` in full audio sync.
+
+---
 
 ## Building From Your Own Legal Copy
 
@@ -209,6 +255,7 @@ nix-shell --run "make lift && make -j$(nproc)"
 ### Standard Linux (Ubuntu / Debian / Fedora / Arch)
 
 Install the build dependencies:
+
 - **Compilers & build tools:** `gcc`, `make`, `pkg-config`, `python3`, `python3-capstone`
 - **Development headers:** `SDL2` (`libsdl2-dev`), `SDL2_ttf` (`libsdl2-ttf-dev`), `FFmpeg` (`libavformat-dev`, `libavcodec-dev`, `libswscale-dev`, `libavutil-dev`), and `OpenGL` (`libgl-dev`)
 
@@ -232,6 +279,8 @@ make lift
 bash tools/package_portable_linux.sh
 ```
 
+---
+
 ## Building the 4K AI Neural HD Pack (`hd_assets/`)
 
 ```bash
@@ -246,6 +295,8 @@ nix-shell --run "python3 tools/extract_assets.py --list"
 nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ```
 
+---
+
 ## Launching & CLI Options
 
 ```bash
@@ -256,6 +307,7 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ```
 
 ### In-Game Hotkeys
+
 | Key | Action |
 |---|---|
 | **F1** | Open/Close Interactive 3-Tab Display, Post-FX & Audio Settings Menu |
@@ -273,6 +325,8 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Shift** | Hold for 2× fast-walk speed |
 | **Ctrl + P** or **PrintScreen** | Save clean 4K PNG screenshot (`screenshots/`) |
 | **ESC** | Skip cutscenes / open game menu / close F1 menu |
+
+---
 
 ## License
 
