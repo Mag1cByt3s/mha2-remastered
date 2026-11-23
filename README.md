@@ -44,6 +44,24 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
 
 <br>
 
+### Remastered-Widescreen-Hauptmenü (Clean-Room-3D-Goldschrift & 16:9-Erweiterung)
+
+![Remastered-Widescreen-Hauptmenü mit prozeduraler 3D-Goldschrift](docs/images/remaster_showcase_main_menu.png)
+
+<br>
+
+### Interaktives 3-Tab-Einstellungsmenü im Spiel (`F1`)
+
+![Interaktives F1-Einstellungsmenü (Alle 3 Tabs)](docs/images/remaster_showcase_f1_menu.png)
+
+<br>
+
+### Dialog- & Hinweisverlauf (`Strg+L`) & Live-Statistik-HUD (`F3`)
+
+![Dialog- & Hinweisverlauf (Strg+L) mit F3-Statistik-HUD](docs/images/remaster_showcase_dialog_log.png)
+
+<br>
+
 ---
 
 <br>
@@ -60,8 +78,9 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
   - **16:9 Cinema (`800×450`)**: randloses 16:9-Gameplay mit transparenten On-Demand-Overlays oben & unten.
   - **4:3-Menüs**: seitenverhältnistreue Darstellung mit optionalen weichgezeichneten Ambient-Sidebars.
 
-- **Interaktives 3-Tab-Grafik- & Remaster-FX-Menü im Spiel (`F1`) + Auto-Save (`mha2_settings.ini`)**:
-  - Per Maus und Tastatur bedienbares 3-Tab-Menü (`1. Display & Scaling`, `2. Remaster FX & AA`, `3. Assets, HUD & Audio`) für Auflösungs-Presets (`800×600`–`2560×1600`), Seitenverhältnis, Shader, Bloom, Color Grading, Silhouetten-AA, Vignette, Szenenübergänge, HD-Assets sowie Lautstärke/Hall/EQ — automatisch gespeichert in `mha2_settings.ini`.
+- **Interaktives 3-Tab-Grafik- & Remaster-FX-Menü im Spiel (`F1`), Dialog-Log (`Strg+L`) & Clean-Room-Hauptmenü-Titel**:
+  - Per Maus und Tastatur bedienbares 3-Tab-Menü (`1. DISPLAY`, `2. POST-FX`, `3. ASSETS & TEXT`) für Auflösungs-Presets (`800×600`–`2560×1600`), Seitenverhältnis, Shader, Bloom, Color Grading, Silhouetten-AA, Vignette, Szenenübergänge, HD-Assets sowie Lautstärke/Hall/EQ — automatisch gespeichert in `mha2_settings.ini`.
+  - Enthält außerdem einen durchsuchbaren Dialog- & Hinweisverlauf (`Strg+L`), das kompakte `F3`-Performance-HUD sowie den prozedural in OpenGL/SDL2 gerenderten **3D-Goldschriftzug „REMASTERED“** im Hauptmenü (Clean-Room, aktiv im 4K-HD- sowie im Klassikmodus).
 
 - **Multi-Pass OpenGL 3.3 FBO Post-Processing & weiche Szenen-Überblendungen**:
   - **Emissiver Bloom** (`Off / Subtle / Medium / Rich`): Viertelauflösungs-`GL_RGBA16F`-Bright-Pass + zweifacher separabler 9-Tap-Gauß-Blur für Kerzen, Fackeln, Kronleuchter und Goldartefakte.
@@ -253,6 +272,24 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
 
 <br>
 
+### Remastered Widescreen Main Menu (Clean-Room Procedural 3D Gold Title & 16:9 Wings)
+
+![Remastered Widescreen Main Menu with Procedural 3D Gold Title](docs/images/remaster_showcase_main_menu.png)
+
+<br>
+
+### Interactive 3-Tab In-Game Settings Menu (`F1`)
+
+![Interactive F1 In-Game Settings Menu (All 3 Tabs)](docs/images/remaster_showcase_f1_menu.png)
+
+<br>
+
+### In-Game Dialog & Clue History Log (`Ctrl+L`) & Live Stats HUD (`F3`)
+
+![In-Game Dialog & Clue History Log (Ctrl+L) with F3 Stats HUD](docs/images/remaster_showcase_dialog_log.png)
+
+<br>
+
 ---
 
 <br>
@@ -269,8 +306,9 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
   - **16:9 Cinema (`800×450`)**: edge-to-edge 16:9 gameplay with transparent on-demand top & bottom overlays.
   - **4:3 Menus**: aspect-correct with optional blurred ambient sidebars.
 
-- **Interactive 3-Tab In-Game Graphics & Remaster FX Menu (`F1`) + Auto-Save (`mha2_settings.ini`)**:
-  - Mouse + keyboard 3-tab menu (`1. Display & Scaling`, `2. Remaster FX & AA`, `3. Assets, HUD & Audio`) controlling resolution presets (`800×600`–`2560×1600`), aspect mode, shaders, bloom, color grading, silhouette AA, vignette, transitions, HD assets, and volume/reverb/EQ — automatically saved to `mha2_settings.ini`.
+- **Interactive 3-Tab In-Game Settings Menu (`F1`), Dialog History Log (`Ctrl+L`) & Clean-Room Main Menu Title**:
+  - Mouse + keyboard 3-tab menu (`1. DISPLAY`, `2. POST-FX`, `3. ASSETS & TEXT`) controlling resolution presets (`800×600`–`2560×1600`), aspect mode, shaders, bloom, color grading, silhouette AA, vignette, transitions, HD assets, and volume/reverb/EQ — automatically saved to `mha2_settings.ini`.
+  - Also includes a `Ctrl+L` Dialog & Clue History Log, an `F3` live performance HUD, and a clean-room procedurally rendered **3D brushed-gold `"REMASTERED"`** Main Menu badge (active in both 4K HD and classic modes).
 
 - **Multi-Pass OpenGL 3.3 FBO Post-Processing & Smooth Scene Crossfades**:
   - **Emissive Bloom** (`Off / Subtle / Medium / Rich`): quarter-res `GL_RGBA16F` warm-weighted bright-pass + dual separable 9-tap Gaussian blur for candles, torches, chandeliers, and gold artifacts.
