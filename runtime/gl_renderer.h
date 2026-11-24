@@ -231,6 +231,8 @@ void gl_renderer_toggle_hd_text(void);
 void gl_renderer_toggle_hd_assets(void);
 void gl_renderer_toggle_decoupled_cursor(void);
 void gl_renderer_show_toast(const char *fmt, ...);
+/* Presented frame shows dialog choices reaching above the inventory band (y < 537). */
+void gl_renderer_set_dialog_choices_visible(int visible);
 /* Toast shown once, as soon as the main menu is visible (e.g. "Updated to v5.5.0" from play.sh). */
 void gl_renderer_set_startup_notice(const char *text);
 

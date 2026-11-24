@@ -92,6 +92,10 @@ typedef struct DDrawSurface {
     } sprite_cache[96];
     GlTextDraw text_draws[MAX_SURFACE_TEXT_DRAWS];
     int num_text_draws;
+    /* Lines of the game's bitmap font starting at y >= 495 on this screen surface (dialog
+     * choices / bottom hover labels), evicted when overwritten - see win32_ddraw.c. */
+    struct { int16_t x, y, h; } bottom_lines[8];
+    int num_bottom_lines;
 
     /* Cursor sprite auto-detection */
     int is_cursor;

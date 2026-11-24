@@ -139,7 +139,8 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 
 6. **Hotspot Highlights & Widescreen Dialogs:**
    - `Space`/`H` hotspot highlights must come from `game_collect_room_hotspots()` in `runtime/game_patches.c`, not sprite-name guesses.
-   - In `16:10`/`16:9` widescreen modes, bottom dialog choices reach `y=525..536` (`update_hud_bar_masks()`, `uDialogBar`) — keep dialog bar detection, shader UV remapping (including `FS_POST` `F2` compare split-screen), `g_top_bar_has_buttons` corner routing, and pointer/gamepad coordinate mapping synchronized.
+   - In `16:10`/`16:9` widescreen modes, bottom dialog choices reach `y=500..536` (`uDialogBar`) — keep dialog bar detection, shader UV remapping (including `FS_POST` `F2` compare split-screen), `g_top_bar_has_buttons` corner routing, and pointer/gamepad coordinate mapping synchronized.
+   - Dialog-choice detection must stay text-based (`bottom_choices_visible()` in `runtime/win32_ddraw.c`: `Font::DrawText` lines tracked per screen surface, evicted by opaque blits/fills, swapped on `Flip`). Never go back to pixel heuristics: dark rooms + inventory look like a dialog box, and choices over a lit room edge do not. `MHA2_DEBUG_HUDBAR=1` logs layout switches.
 
 7. **GL Thread Ownership & Resource Teardown:**
    - `gl_renderer_shutdown()` and `SDL_Quit()` (including from `ExitProcess`/`TerminateProcess` in `runtime/win32_kernel.c`) must only run on the GL thread (`gl_renderer_is_gl_thread()`).

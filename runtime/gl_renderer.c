@@ -342,6 +342,7 @@ static float g_vp_win_x = 0.0f, g_vp_win_y = 0.0f, g_vp_win_w = 800.0f, g_vp_win
 static uint8_t g_top_bar_mask[800 * 75]; /* non-black mask of y=0..74 for smart click routing */
 static uint8_t g_bot_bar_mask[800 * 50]; /* non-black mask of y=537..586 for 16:9 inventory hits */
 static int     g_bot_bar_dialog_mode = 0; /* 1 when multi-line dialog choices span y=500..599 */
+static int     g_dialog_choices_visible = 0; /* from win32_ddraw.c font line tracking, per presented frame */
 static int     g_top_bar_has_buttons = 0; /* 1 when top corners contain minigame Exit/Help controls */
 
 /* ---- v3 HD Background Replacement State ---- */
@@ -2494,26 +2495,6 @@ static void update_hud_bar_masks(const void *pixels, int w, int h, int pitch, in
         }
     }
     g_top_bar_has_buttons = (top_corner_lit >= 60) ? 1 : 0;
-    int black_500_524 = 0;
-    int lit_500_599 = 0;
-    for (int y = 500; y < 525; y++) {
-        const uint8_t *row = base + y * pitch;
-        if (bpp == 32) {
-            const uint32_t *p = (const uint32_t *)row;
-            for (int x = 0; x < 800; x++) {
-                uint32_t px = p[x] & 0xFFFFFFu;
-                uint32_t r = (px >> 16) & 0xFFu, g = (px >> 8) & 0xFFu, b = px & 0xFFu;
-                if (r <= 10 && g <= 10 && b <= 10) black_500_524++;
-                if (r > 18 || g > 18 || b > 18) lit_500_599++;
-            }
-        } else {
-            const uint16_t *p = (const uint16_t *)row;
-            for (int x = 0; x < 800; x++) {
-                if (p[x] == 0) black_500_524++;
-                else lit_500_599++;
-            }
-        }
-    }
     for (int y = 525; y < 600; y++) {
         const uint8_t *row = base + y * pitch;
         uint8_t *dst = (y >= 537 && y < 587) ? (g_bot_bar_mask + (y - 537) * 800) : NULL;
@@ -2524,19 +2505,26 @@ static void update_hud_bar_masks(const void *pixels, int w, int h, int pitch, in
                 uint32_t r = (px >> 16) & 0xFFu, g = (px >> 8) & 0xFFu, b = px & 0xFFu;
                 uint8_t lit = (r > 18 || g > 18 || b > 18) ? 1u : 0u;
                 if (dst) dst[x] = lit;
-                lit_500_599 += lit;
             }
         } else {
             const uint16_t *p = (const uint16_t *)row;
             for (int x = 0; x < 800; x++) {
                 uint8_t lit = (p[x] != 0) ? 1u : 0u;
                 if (dst) dst[x] = lit;
-                lit_500_599 += lit;
             }
         }
     }
-    /* Solid black dialog box across y=500..524 (>82.5% pure black) with visible dialog text in y=500..599 */
-    g_bot_bar_dialog_mode = (black_500_524 >= 16500 && lit_500_599 >= 60) ? 1 : 0;
+    /* Dialog choices reaching above the inventory band, tracked from the game's font calls
+       (win32_ddraw.c bottom_choices_visible()) - pixels cannot tell them from a dark room's
+       black bottom rows plus the inventory. */
+    g_bot_bar_dialog_mode = g_dialog_choices_visible;
+}
+
+void gl_renderer_set_dialog_choices_visible(int visible) {
+    visible = visible ? 1 : 0;
+    if (visible != g_dialog_choices_visible && getenv("MHA2_DEBUG_HUDBAR"))
+        fprintf(stderr, "[hud] dialog choices %s\n", visible ? "shown" : "gone");
+    g_dialog_choices_visible = visible;
 }
 
 static int mask_hit_near(const uint8_t *mask, int w, int h, int cx, int cy, int rad) {

@@ -4,6 +4,15 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
+## [v5.5.2 — Widescreen Dialog Choices & Dark Rooms] (2026-11-24)
+
+### Fixes
+- **Dark Rooms Lost Their Bottom Edge When the Inventory Appeared (16:10 / 16:9, e.g. the Golem Room `l/019`)**: the widescreen dialog-choice layout was triggered by a pixel heuristic ("rows 500–524 mostly black + something lit below"), which a dark room's black bottom rows plus the inventory satisfied — the layout jumped and cut ~50 rows off the room.
+- **First Dialog Choice Cut Off With Three or More Options (e.g. the Grundstein in `l/013`)**: the same heuristic never fired for choices drawn over a lit room edge, so *"Was bedrückt dich denn?"* (y=522) stayed hidden above the inventory band.
+- Both fixed by tracking the game's own font calls (`runtime/win32_ddraw.c`): every `Font::DrawText` line starting at y ≥ 495 is remembered on the screen surface it is drawn into and forgotten when an opaque blit or colour fill paints over it; the dialog layout is used while ≥ 2 lines in one column are visible and one starts above the inventory band (y < 537). Hover labels (single lines) and the inventory never count. Works with HD vector text on and off.
+
+---
+
 ## [v5.5.1 — Cursor-Key Scenes & WASD] (2026-11-24)
 
 ### Fixes

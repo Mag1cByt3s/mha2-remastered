@@ -140,6 +140,62 @@ static void evict_texts_in_rect(DDrawSurface *dst, int x0, int y0, int x1, int y
     dst->num_text_draws = out;
 }
 
+/* ---- Dialog choice detection (16:10 / 16:9 bottom band) ----
+ * Dialog choices are lines of the game's bitmap font in one column at the bottom (e.g.
+ * x=286, y=522/546/570); with three or more options the first one starts above the
+ * inventory band (y=537..586) that the widescreen layouts show. Every Font::DrawText line
+ * starting at y >= 495 is remembered on the screen surface it was unlocked into and
+ * forgotten when an opaque blit / colour fill paints over its start. Replaces the old pixel
+ * heuristic (black y=500..524 + lit pixels), which mistook the inventory of dark rooms
+ * (golem room l/019) for dialog choices and never saw choices drawn over a lit room edge. */
+typedef struct { int active, x, y, h; } FontLineCtx;
+static FontLineCtx g_font_line;
+
+static void record_bottom_line(DDrawSurface *s, int x, int y, int h) {
+    if (!s || y < 495 || y >= 600) return;
+    for (int i = 0; i < s->num_bottom_lines; i++) {
+        if (s->bottom_lines[i].x == x && s->bottom_lines[i].y == y) return;
+    }
+    if (s->num_bottom_lines >= (int)(sizeof(s->bottom_lines) / sizeof(s->bottom_lines[0]))) {
+        memmove(&s->bottom_lines[0], &s->bottom_lines[1],
+                (size_t)(s->num_bottom_lines - 1) * sizeof(s->bottom_lines[0]));
+        s->num_bottom_lines--;
+    }
+    s->bottom_lines[s->num_bottom_lines].x = (int16_t)x;
+    s->bottom_lines[s->num_bottom_lines].y = (int16_t)y;
+    s->bottom_lines[s->num_bottom_lines].h = (int16_t)(h > 0 ? h : 16);
+    s->num_bottom_lines++;
+}
+
+/* A line is gone once its start (first 32 px, full height) is painted over. */
+static void evict_bottom_lines(DDrawSurface *dst, int x0, int y0, int x1, int y1) {
+    if (!dst || dst->num_bottom_lines <= 0) return;
+    int out = 0;
+    for (int i = 0; i < dst->num_bottom_lines; i++) {
+        int lx = dst->bottom_lines[i].x, ly = dst->bottom_lines[i].y, lh = dst->bottom_lines[i].h;
+        int covered = (x0 <= lx && x1 >= lx + 32 && y0 <= ly && y1 >= ly + lh);
+        if (!covered) dst->bottom_lines[out++] = dst->bottom_lines[i];
+    }
+    dst->num_bottom_lines = out;
+}
+
+/* Choices: >= 2 lines in one column, at least one starting above the inventory band.
+   Single lines (hover labels) never count. */
+static int bottom_choices_visible(const DDrawSurface *s) {
+    if (!s) return 0;
+    for (int i = 0; i < s->num_bottom_lines; i++) {
+        int n = 0, above = 0;
+        for (int j = 0; j < s->num_bottom_lines; j++) {
+            int dx = s->bottom_lines[j].x - s->bottom_lines[i].x;
+            if (dx < -2 || dx > 2) continue;
+            n++;
+            if (s->bottom_lines[j].y < 537) above = 1;
+        }
+        if (n >= 2 && above) return 1;
+    }
+    return 0;
+}
+
 /* Track last full-scene background surface to trigger smooth room crossfades */
 static uint32_t g_last_bg_surface_va = 0;
 static int g_last_bg_asset_id = -1;
@@ -630,6 +686,7 @@ void ddraw_present_surface(DDrawSurface *surf) {
     g_cursor_drawn_this_frame = 0;
     gl_canvas_set_present_slot(surf_spr_slot(surf));
     gl_renderer_set_frame_texts(surf->text_draws, surf->num_text_draws);
+    gl_renderer_set_dialog_choices_visible(bottom_choices_visible(surf));
     gl_renderer_present_pixels(g_mem + surf->pixels_va, (int)surf->width, (int)surf->height,
                                (int)surf->pitch, (int)surf->bpp);
 }
@@ -641,6 +698,7 @@ void ddraw_present_rgb24(const uint8_t *rgb, int w, int h, int stride) {
     gl_renderer_set_scene_widescreen(0);
     gl_renderer_clear_hd_background();
     gl_renderer_set_frame_texts(NULL, 0);
+    gl_renderer_set_dialog_choices_visible(0);
     gl_renderer_present_rgb24(rgb, w, h, stride);
 }
 
@@ -651,6 +709,7 @@ static void surface_colorfill(DDrawSurface *dst, int x0, int y0, int x1, int y1,
     if (y1 > (int)dst->height) y1 = (int)dst->height;
     if (x0 >= x1 || y0 >= y1) return;
     evict_texts_in_rect(dst, x0, y0, x1, y1);
+    evict_bottom_lines(dst, x0, y0, x1, y1);
     if (dst->is_primary || dst->is_backbuffer) {
         if (gl_renderer_is_active()) {
             float r, g, b;
@@ -1039,6 +1098,7 @@ static void surface_blt(DDrawSurface *dst, int dx0, int dy0, int dx1, int dy1,
     /* ---- v3 Native Vector Text Propagation ---- */
     if (!use_src_ck) {
         evict_texts_in_rect(dst, dx0, dy0, dx1, dy1);
+        evict_bottom_lines(dst, dx0, dy0, dx1, dy1);
     }
     if (src->num_text_draws > 0) {
         int off_x = dx0 - sx0;
@@ -1449,6 +1509,14 @@ void com_ddraw_dispatch(CpuCtx *c, uint32_t iface_id, uint32_t slot) {
                         back->num_text_draws = tmp_ntd;
                         if (tmp_ntd > 0) memcpy(back->text_draws, tmp_td, (size_t)tmp_ntd * sizeof(GlTextDraw));
 
+                        int tmp_nbl = s->num_bottom_lines;
+                        __typeof__(s->bottom_lines) tmp_bl;
+                        memcpy(tmp_bl, s->bottom_lines, sizeof(tmp_bl));
+                        memcpy(s->bottom_lines, back->bottom_lines, sizeof(tmp_bl));
+                        s->num_bottom_lines = back->num_bottom_lines;
+                        memcpy(back->bottom_lines, tmp_bl, sizeof(tmp_bl));
+                        back->num_bottom_lines = tmp_nbl;
+
                         /* Swap primary/backbuffer 4K GPU canvases in lockstep with pixel buffers */
                         gl_canvas_flip();
 
@@ -1563,6 +1631,7 @@ void com_ddraw_dispatch(CpuCtx *c, uint32_t iface_id, uint32_t slot) {
                         s->cell_probe_room_gen = 0;
                         s->num_text_draws = 0;
                     } else {
+                        if (g_font_line.active) record_bottom_line(s, g_font_line.x, g_font_line.y, g_font_line.h);
                         sync_screen_lock_diff_to_canvas(s);
                         if (s->is_primary) {
                             win32_pump_sdl_events();
@@ -2066,8 +2135,34 @@ static void font_cp1252_to_utf8(const uint8_t *src, int len, char *dst, size_t d
     dst[j] = '\0';
 }
 
+static int font_line_height(uint32_t font_va) {
+    int line_h = 16;
+    if (font_va && font_va < GUEST_MEM_SIZE - 0x24u) {
+        uint32_t fhdr_va = mem_r32(font_va + 0x1cu);
+        if (fhdr_va && fhdr_va < GUEST_MEM_SIZE - 0x18u) {
+            int h = (int32_t)mem_r32(fhdr_va + 0x04u);
+            if (h >= 10 && h <= 64) line_h = h;
+        }
+    }
+    return line_h;
+}
+
+static void hook_font_draw_text_impl(CpuCtx *c);
+
+/* Font::DrawText(this=font, clip, str, x, y, len): remember the line for the screen-surface
+   Unlock that writes it (dialog choice detection), with HD vector text on or off. */
 static void hook_font_draw_text(CpuCtx *c) {
     if (!g_orig_font_draw_fn) return;
+    FontLineCtx prev = g_font_line;
+    g_font_line.active = 1;
+    g_font_line.x = (int32_t)mem_r32(c->esp + 16u);
+    g_font_line.y = (int32_t)mem_r32(c->esp + 20u);
+    g_font_line.h = font_line_height(c->ecx);
+    hook_font_draw_text_impl(c);
+    g_font_line = prev;
+}
+
+static void hook_font_draw_text_impl(CpuCtx *c) {
     if (!g_cfg.hd_vector_text || !gl_renderer_is_active()) {
         g_orig_font_draw_fn(c);
         return;
@@ -2094,14 +2189,7 @@ static void hook_font_draw_text(CpuCtx *c) {
         return;
     }
 
-    int line_h = 16;
-    if (font_va && font_va < GUEST_MEM_SIZE - 0x24u) {
-        uint32_t fhdr_va = mem_r32(font_va + 0x1cu);
-        if (fhdr_va && fhdr_va < GUEST_MEM_SIZE - 0x18u) {
-            int h = (int32_t)mem_r32(fhdr_va + 0x04u);
-            if (h >= 10 && h <= 64) line_h = h;
-        }
-    }
+    int line_h = font_line_height(font_va);
 
     /* Call Font::MeasureText (0x00486ad0) on a scratch CpuCtx copy to get the exact,
        dirty-rect-invariant unclipped pixel span [text_x0 .. text_x0 + text_w]! */
