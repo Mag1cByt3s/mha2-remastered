@@ -264,6 +264,7 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Umschalt** (`Shift`) | Gedrückt halten für 2× Schnelllauf-Geschwindigkeit |
 | **Strg+P** oder **Druck** | Sauberen 4K-PNG-Screenshot speichern (`screenshots/`) |
 | **Strg+S** / **Strg+O** | Schnellspeichern / Schnellladen (Slot 9) |
+| **Pfeiltasten** / **W A S D** | Moorhuhn in Szenen mit Tastatursteuerung lenken (Space-Invaders-Minispiel, dunkler Gang hinter dem zersägten Gitter) |
 | **ESC** | Zwischensequenzen überspringen / Spielmenü / F1-Menü schließen |
 | **Controller** | Linker Stick = Cursor, A = Klick, B = Rechtsklick, X = Hotspots, Y/LB = Schnelllauf, Back = F1, Start = ESC, Steuerkreuz ↑/↓ = Schnellspeichern/-laden |
 
@@ -549,6 +550,7 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Shift** | Hold for 2× fast-walk speed |
 | **Ctrl + P** or **PrintScreen** | Save clean 4K PNG screenshot (`screenshots/`) |
 | **Ctrl+S** / **Ctrl+O** | Quick save / quick load (slot 9) |
+| **Arrow keys** / **W A S D** | Steer the Moorhuhn in keyboard-controlled scenes (Space Invaders minigame, dark corridor behind the sawn grate) |
 | **ESC** | Skip cutscenes / open game menu / close F1 menu |
 | **Controller** | Left stick = cursor, A = click, B = right click, X = hotspots, Y/LB = fast walk, Back = F1, Start = ESC, D-pad Up/Down = quick save/load |
 

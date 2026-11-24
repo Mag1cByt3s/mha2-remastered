@@ -229,6 +229,7 @@ CONTROLS & SHORTCUTS (defaults; rebind in F1 -> 4. CONTROLS):
   Space or H     Hold to highlight interactive hotspots in the room
   Shift          Hold for 2x fast-walk speed
   Ctrl + S / O   Quick Save / Quick Load (slot 9)
+  Arrows / WASD  Steer the Moorhuhn in keyboard-controlled scenes (dark corridor)
   Ctrl + L       Dialog & clue history
   Ctrl + P       Save a clean 4K PNG screenshot (saved to screenshots/)
   Alt + Enter    Toggle Fullscreen / Windowed

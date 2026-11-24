@@ -4,6 +4,16 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
+## [v5.5.1 — Cursor-Key Scenes & WASD] (2026-11-24)
+
+### Fixes
+- **Arrow Keys Dead in All Four Cursor-Key Scenes — the Space Invaders Minigame (`m/025`, arrows + `Space`), the Dark Corridor Behind the Sawn Grate (`l/018`), `l/015` and `l/045`**: the runtime sent every `WM_KEYDOWN`/`WM_KEYUP` with `lParam = 1`, but Windows sets the extended-key flag (bit 24) and a scan code for the cursor/navigation block. The game folds bit 24 into its key codes and those scenes register the arrows as `0x01010025–28`, so the arrow keys never reached them. Key messages now carry Windows-accurate `lParam` values (arrows, Insert/Delete/Home/End/Page Up/Down, right Ctrl/Alt, keypad Enter); the release keeps the flag too, so movement cannot stick.
+
+### New Features
+- **`W` / `A` / `S` / `D` Steer Like the Arrow Keys** in those scenes: a lifter insert (`recomp/lift.py`, `0x00440978`) looks W/A/S/D up as the arrow key bindings. Only the key-binding lookup sees the remapped code — typing savegame names and GUI focus still get plain letters.
+
+---
+
 ## [v5.5 — Automatic Updates] (2026-11-24)
 
 ### New Features

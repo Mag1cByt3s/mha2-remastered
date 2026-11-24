@@ -170,9 +170,11 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
     - Injected mouse moves must travel in ≤48 px steps (`inject_move_to()`): the game drops large single DirectInput deltas. The game only accepts clicks on an already-hovered target (`click`/`clickspot` hover 250 ms).
     - Macros (quick save/load) must never `_exit`; failures go through `macro_end()`. Quick save may only write slot 9 if it is empty or hash-matches `mha2_quicksave.id`.
 
-13. **Hotkeys (`runtime/input_bindings.c`):** all remaster hotkeys go through `bindings_match_key()`/`perform_action()`; Escape, Alt+F4, Alt+Enter and pad A/B/Start stay fixed. Press chords require exact Ctrl/Alt so plain letters typed into savegame names never trigger actions. UI hints use `bindings_describe()`.
+13. **Key Messages (`runtime/win32_user_gdi.c`):** `WM_KEYDOWN`/`WM_KEYUP` `lParam` must stay Windows-accurate (`sdl_key_lparam()`: scan code + extended bit 24 for the cursor/navigation block). The game builds key codes as `vk | 0x10000 | (lParam & 0x01000000)`; cursor-key scenes bind the arrows only with bit 24 set, while GUI code masks it off (`& 0xfeffffff` / `& 0xffffff`).
 
-14. **Updater & Player Data (`tools/update.sh`, `play.sh`):**
+14. **Hotkeys (`runtime/input_bindings.c`):** all remaster hotkeys go through `bindings_match_key()`/`perform_action()`; Escape, Alt+F4, Alt+Enter and pad A/B/Start stay fixed. Press chords require exact Ctrl/Alt so plain letters typed into savegame names never trigger actions. UI hints use `bindings_describe()`.
+
+15. **Updater & Player Data (`tools/update.sh`, `play.sh`):**
     - Players' installs are git checkouts updated to the newest **release tag** (`vMAJOR.MINOR[.PATCH]`; other tag styles are ignored). Untagged commits on `main` never reach players.
     - Everything a player owns must stay gitignored (`game_files/` incl. `mha2.sav/`, `mha2_settings.ini`, `hd_assets/`, `backups/`); never move player data into tracked paths and never add tracked files the game writes at runtime.
     - Keep both scripts wrapped in `main "$@"; exit $?` (git may rewrite them while they run). `tools/update.sh` prints nothing on stdout except the in-game notice line. Persist new ini keys in `gl_config_load/save()`, otherwise the game drops them on the next settings save (cf. `auto_update`).

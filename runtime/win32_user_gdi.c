@@ -103,6 +103,32 @@ static uint32_t sdl_key_to_vk(SDL_Keycode sym) {
     }
 }
 
+/* WM_KEYDOWN/WM_KEYUP lParam as Windows builds it: repeat count, set-1 scan code and the
+ * extended-key flag (bit 24) for the cursor/navigation block, right Ctrl/Alt and keypad
+ * Enter. The game folds bit 24 into its key codes (0x4e2610: code = vk | 0x10000 |
+ * (lParam & 0x01000000)) and scenes such as the dark corridor behind the sawn grate
+ * register the arrows as 0x01010025..28 - without the flag they never see them. */
+static uint32_t sdl_key_lparam(SDL_Keycode sym, int key_up) {
+    uint32_t scan = 0, ext = 0;
+    switch (sym) {
+        case SDLK_LEFT:     scan = 0x4B; ext = 1; break;
+        case SDLK_UP:       scan = 0x48; ext = 1; break;
+        case SDLK_RIGHT:    scan = 0x4D; ext = 1; break;
+        case SDLK_DOWN:     scan = 0x50; ext = 1; break;
+        case SDLK_INSERT:   scan = 0x52; ext = 1; break;
+        case SDLK_DELETE:   scan = 0x53; ext = 1; break;
+        case SDLK_HOME:     scan = 0x47; ext = 1; break;
+        case SDLK_END:      scan = 0x4F; ext = 1; break;
+        case SDLK_PAGEUP:   scan = 0x49; ext = 1; break;
+        case SDLK_PAGEDOWN: scan = 0x51; ext = 1; break;
+        case SDLK_RCTRL:    scan = 0x1D; ext = 1; break;
+        case SDLK_RALT:     scan = 0x38; ext = 1; break;
+        case SDLK_KP_ENTER: scan = 0x1C; ext = 1; break;
+        default: break;
+    }
+    return 1u | (scan << 16) | (ext << 24) | (key_up ? 0xC0000000u : 0u);
+}
+
 static SDL_GameController *g_gamepad = NULL;
 static uint32_t g_gamepad_last_ms = 0;
 
@@ -427,7 +453,7 @@ void win32_pump_sdl_events(void) {
                 }
                 uint32_t vk = sdl_key_to_vk(sym);
                 if (vk) {
-                    push_msg(g_main_hwnd, 0x0100u /* WM_KEYDOWN */, vk, 1);
+                    push_msg(g_main_hwnd, 0x0100u /* WM_KEYDOWN */, vk, sdl_key_lparam(sym, 0));
                     if (vk == 0x08 || vk == 0x0D || vk == 0x1B || vk == 0x09) {
                         push_msg(g_main_hwnd, 0x0102u /* WM_CHAR */, vk, 1);
                     }
@@ -440,7 +466,7 @@ void win32_pump_sdl_events(void) {
                 int act = bindings_match_key_release(sym, &slot);
                 if (act >= 0) set_hold_action(act, 1u << slot, 0);
                 uint32_t vk = sdl_key_to_vk(sym);
-                if (vk) push_msg(g_main_hwnd, 0x0101u /* WM_KEYUP */, vk, 0xC0000001u);
+                if (vk) push_msg(g_main_hwnd, 0x0101u /* WM_KEYUP */, vk, sdl_key_lparam(sym, 1));
                 break;
             }
             case SDL_TEXTINPUT:

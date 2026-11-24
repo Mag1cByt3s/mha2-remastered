@@ -1087,6 +1087,20 @@ GUEST_BUGFIX_INSERTS = {
         "(screen closed by loading a game) - keyboard focus disabled until the next screen\\n\", _root); } "
         "goto L_0044292b; } } /* bugfix: stale Tab-navigation root */"
     ),
+    # 0x00440920 key-event -> key-binding dispatcher (registry std::map at this+0x20, keyed
+    # by the event code vk | 0x10000 | extended bit). Scenes that steer the Moorhuhn with the
+    # cursor keys (dark corridor behind the sawn grate and three more, set up in
+    # 0x00408180 / 0x00413d50 / 0x00415f40 / 0x00417040) register the arrows as
+    # 0x01010025..28. QoL: W/A/S/D are looked up as those arrow bindings. Only this
+    # lookup sees the remapped code - the event itself (focus manager, text entry) still
+    # carries W/A/S/D, and the game binds none of these letters itself.
+    0x00440978: (
+        "switch (c->eax) { case 0x10057u: c->eax = 0x1010026u; break; "  # W -> Up
+        "case 0x10041u: c->eax = 0x1010025u; break; "                    # A -> Left
+        "case 0x10053u: c->eax = 0x1010028u; break; "                    # S -> Down
+        "case 0x10044u: c->eax = 0x1010027u; break; default: break; } "  # D -> Right
+        "/* QoL: WASD as cursor keys for key bindings */"
+    ),
     # 0x004115a0 save-screen (singleton 0x00526a28) message handler, this = screen + 8.
     # Defence in depth for the bug above: messages while the screen is closed (+0x1c ==
     # NULL) are consumed instead of reaching code that dereferences the screen.
