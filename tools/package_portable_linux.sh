@@ -55,6 +55,10 @@ else
     echo "[pack] Reusing cached builder image $IMAGE_TAGGED"
 fi
 
+# The builder container has no git: resolve the engine version (release tag) on the host.
+MHA2_VERSION="$(git -C "$ROOT" describe --tags --match 'v[0-9]*.[0-9]*' --always --dirty 2>/dev/null || echo unknown)"
+echo "[pack] Engine version $MHA2_VERSION"
+
 echo "[pack] Staging portable Linux x86_64 bundle in $STAGE"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/lib" "$STAGE/fonts" "$STAGE/game_files/mha2.sav" "$ROOT/work/build_portable"
@@ -62,6 +66,7 @@ mkdir -p "$STAGE/lib" "$STAGE/fonts" "$STAGE/game_files/mha2.sav" "$ROOT/work/bu
 # Build binary, collect transitive non-core deps, patch ELF headers, bundle fonts & verify ABI
 "$CTR" run --rm "${CTR_RUN_ARGS[@]}" -v "$ROOT:/src" -w /src "$IMAGE_TAGGED" bash -euo pipefail -c '
     DIST_NAME="'"$DIST_NAME"'"
+    MHA2_VERSION="'"$MHA2_VERSION"'"
     STAGE="/src/work/dist/$DIST_NAME"
     export PKG_CONFIG_PATH=/opt/sdl2-portable/lib/pkgconfig:/opt/ffmpeg-min/lib/pkgconfig
 
@@ -74,6 +79,7 @@ mkdir -p "$STAGE/lib" "$STAGE/fonts" "$STAGE/game_files/mha2.sav" "$ROOT/work/bu
     make -j"$(nproc)" \
         BUILD_DIR=work/build_portable \
         TARGET=work/build_portable/mha2_linux \
+        MHA2_VERSION="$MHA2_VERSION" \
         SDL_CFLAGS="$SDL_CFLAGS" \
         SDL_LIBS="$SDL_LIBS"
 
@@ -200,10 +206,13 @@ exec "$DIR/mha2_linux" "$@"
 EOF
 chmod 755 "$STAGE/PLAY.sh"
 
+echo "$MHA2_VERSION" > "$STAGE/VERSION"
+
 # Write quick-start guide
 cat > "$STAGE/README_PLAY.txt" << 'EOF'
-Moorhuhn Adventure 2: Der Fluch des Goldes — Remastered v5 (Linux x86_64)
-========================================================================
+Moorhuhn Adventure 2: Der Fluch des Goldes — Remastered (Linux x86_64)
+=====================================================================
+Installed version: see the file VERSION (also shown in the F1 menu title).
 
 HOW TO PLAY:
   Double-click PLAY.sh or run in a terminal:
@@ -231,6 +240,19 @@ CONTROLS & SHORTCUTS (defaults; rebind in F1 -> 4. CONTROLS):
 REQUIREMENTS:
   64-bit Linux (Ubuntu 22.04+, Fedora 39+, Debian 12+, Arch, Mint 21+, SteamOS, etc.)
   with OpenGL 3.3+ graphics drivers.
+
+UPDATING (savegames and settings are kept):
+  1. Close the game. Optional safety copy of saves + settings:
+       cp -a game_files/mha2.sav ~/mha2_saves_backup; cp mha2_settings.ini ~/ 2>/dev/null
+  2. Extract the new ..._Runtime.tar.gz OVER this folder (works even if you renamed it):
+       tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz \
+           --strip-components=1 -C /path/to/this/folder
+  3. Start ./PLAY.sh as usual; the F1 menu title shows the new version.
+  The runtime archive only contains the program (mha2_linux, lib/, fonts/, PLAY.sh,
+  docs). Your game_files/ (incl. saves in game_files/mha2.sav/), mha2_settings.ini,
+  screenshots/ and hd_assets/ are left untouched. Only re-extract the HD asset pack
+  (Moorhuhn_Adventure2_Remastered_HD_Assets.tar, same command with -xf) if you were
+  told that the HD assets changed.
 EOF
 
 if [[ "$MAKE_ARCHIVE" -eq 1 && "$SPLIT" -eq 1 ]]; then

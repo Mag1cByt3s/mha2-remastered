@@ -185,6 +185,28 @@ Installation des geteilten Releases (eigene Spieldateien, gemeinsames Datenverze
 
 <br>
 
+### Portables Bundle aktualisieren
+
+Portable Bundles aktualisieren sich nicht selbst (kein Git, kein Compiler). Ein Update ist das kleine Runtime-Archiv (`…_Runtime.tar.gz`, ca. 12 MB), das mit `bash tools/package_portable_linux.sh --split` aus dem aktuellen Release gebaut wird – es wird einfach **über** den bestehenden Spielordner entpackt:
+
+```bash
+# 1. Spiel beenden. Optionale Sicherheitskopie von Spielständen + Einstellungen:
+cd /pfad/zum/Spielordner
+cp -a game_files/mha2.sav ~/mha2_saves_backup; cp mha2_settings.ini ~/ 2>/dev/null
+
+# 2. Neues Runtime-Archiv über den Ordner entpacken (funktioniert auch, wenn der Ordner umbenannt wurde):
+tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz --strip-components=1 -C .
+
+# 3. Wie gewohnt starten – der Titel im F1-Menü (und die Datei VERSION) zeigt die neue Version:
+./PLAY.sh
+```
+
+- Ersetzt werden nur Programmdateien (`mha2_linux`, `lib/`, `fonts/`, `PLAY.sh`, Doku). **Spielstände (`game_files/mha2.sav/`), `mha2_settings.ini`, Spieldateien, Screenshots und `hd_assets/` bleiben unverändert** – das Archiv enthält keine dieser Dateien.
+- Das funktioniert auch für ältere Komplett-Bundles (Spieldateien + HD-Assets in einem Archiv). Das 5-GB-HD-Asset-Paket muss nur erneut entpackt werden (`tar -xf …_HD_Assets.tar --strip-components=1 -C .`), wenn sich die HD-Assets geändert haben.
+- Wer automatische Updates möchte, installiert stattdessen per `git clone` (siehe *Automatische Updates*); Spielstände lassen sich übernehmen, indem `game_files/mha2.sav/` und `mha2_settings.ini` in die neue Installation kopiert werden.
+
+<br>
+
 ---
 
 <br>
@@ -445,6 +467,28 @@ bash tools/package_portable_linux.sh --split    # small runtime archive + separa
 ```
 
 Installing the split release (your own game files, shared data directory `~/.local/share/mha2-remastered/`): [docs/INSTALL.md](docs/INSTALL.md).
+
+<br>
+
+### Updating a Portable Bundle
+
+Portable bundles do not update themselves (no git, no compiler). An update is the small runtime archive (`…_Runtime.tar.gz`, about 12 MB) built from the current release with `bash tools/package_portable_linux.sh --split` — simply extract it **over** the existing game folder:
+
+```bash
+# 1. Quit the game. Optional safety copy of saves + settings:
+cd /path/to/the/game/folder
+cp -a game_files/mha2.sav ~/mha2_saves_backup; cp mha2_settings.ini ~/ 2>/dev/null
+
+# 2. Extract the new runtime archive over the folder (works even if the folder was renamed):
+tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz --strip-components=1 -C .
+
+# 3. Start as usual — the F1 menu title (and the VERSION file) shows the new version:
+./PLAY.sh
+```
+
+- Only program files are replaced (`mha2_linux`, `lib/`, `fonts/`, `PLAY.sh`, docs). **Savegames (`game_files/mha2.sav/`), `mha2_settings.ini`, game files, screenshots and `hd_assets/` stay untouched** — the archive contains none of them.
+- This also works for older all-in-one bundles (game files + HD assets in one archive). The 5 GB HD asset pack only needs to be extracted again (`tar -xf …_HD_Assets.tar --strip-components=1 -C .`) when the HD assets changed.
+- For automatic updates, install via `git clone` instead (see *Automatic Updates*); carry your saves over by copying `game_files/mha2.sav/` and `mha2_settings.ini` into the new install.
 
 <br>
 

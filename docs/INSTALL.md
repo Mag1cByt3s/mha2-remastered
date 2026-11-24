@@ -39,7 +39,17 @@ overrides: `--game-dir <dir>`, `--hd-dir <dir>`.
 
 ## Updates
 
-The tarball releases do not update themselves. Installs made with
+The tarball releases do not update themselves. To update one, extract a newer
+`…_Runtime.tar.gz` over the existing folder (saves, settings, game files and HD assets
+are not in the archive and stay untouched; `--strip-components=1` makes it independent of
+the folder name):
+
+```bash
+cd /path/to/the/game/folder
+tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz --strip-components=1 -C .
+```
+
+The installed version is in the `VERSION` file and the `F1` menu title. Installs made with
 `git clone https://github.com/Mag1cByt3s/mha2-remastered.git` and started with `./play.sh`
 update automatically to every new release tag (saves and settings are kept and backed
 up; see the README section "Automatic Updates").
