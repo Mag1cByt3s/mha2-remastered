@@ -4,6 +4,16 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
+## [v5.4.1 — Picture-Difference Minigame Performance] (2026-11-24)
+
+### Fixes
+- **Lag & 100% CPU in the Dining-Room Picture Minigame (`m/012`)**: the game blits from two different background surfaces every frame (`objBg1`/`objBg2`), but the renderer kept only one HD background texture — every switch re-decoded a 3200×1800 WebP and rebuilt its mipmaps on the render thread (4 fps in the close-up, zoom animation crawling). HD backgrounds now live in a 4-entry GPU texture cache (`runtime/gl_renderer.c`, LRU, includes `*_wide` siblings); switching between cached backgrounds is a texture bind (≈2 decodes per visit instead of ~3 per second).
+
+### Testing
+- Replay `log` lines now include the presented frame rate (`fps=`) for performance checks (`docs/REPLAY.md`).
+
+---
+
 ## [v5.4 — Correctness Hardening, Replay Test Harness, Quick Save, Rebindable Controls & Split Release] (2026-11-24)
 
 ### Original 2005 Game Bugfixes (`recomp/lift.py`, `runtime/game_patches.c`, `runtime/guest_sync.c`)

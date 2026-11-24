@@ -142,6 +142,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 7. **GL Thread Ownership & Resource Teardown:**
    - `gl_renderer_shutdown()` and `SDL_Quit()` (including from `ExitProcess`/`TerminateProcess` in `runtime/win32_kernel.c`) must only run on the GL thread (`gl_renderer_is_gl_thread()`).
    - Any new GL texture/FBO/program added in `runtime/gl_renderer.c` (such as `g_dialog_log_tex` via `gl_dialog_log_shutdown()` and `g_remastered_badge_tex`) must be deleted inside `gl_renderer_shutdown()`.
+   - HD backgrounds live in the `g_bg_cache[]` GPU texture cache (`bg_cache_acquire()`); `g_bg_hd_tex`/`g_bg_wide_tex` only alias the active entry. Never go back to a single re-uploaded texture: screens such as the `m/012` picture minigame blit from two backgrounds per frame.
 
 8. **Lock-Free Audio Config Atomics:**
    - `runtime/win32_dsound.c` reads `g_cfg.master_volume`, `g_cfg.muted`, `g_cfg.audio_reverb`, and `g_cfg.audio_eq` on the SDL audio callback thread using `__atomic_load` / `__atomic_load_n`.

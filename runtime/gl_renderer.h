@@ -243,6 +243,7 @@ void gl_window_to_game_coords(int win_x, int win_y, int *out_gx, int *out_gy);
 void gl_window_to_game_coords_f(int win_x, int win_y, float *out_gx, float *out_gy);
 void gl_renderer_clamp_gamepad_cursor(float *nx, float *ny);
 int  gl_renderer_is_active(void);
+float gl_renderer_current_fps(void); /* presented frames/s over the last ~400 ms window */
 int  gl_renderer_is_gl_thread(void);
 const char *gl_shader_name(int mode);
 const char *gl_vsync_name(int mode);

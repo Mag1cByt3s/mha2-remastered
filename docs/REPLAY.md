@@ -52,7 +52,7 @@ current segment, `+<t>` is relative to the previous event.
 | `<t> shot <name>` | Clean screenshot (game image) to `<out>/<name>.png` |
 | `<t> shotfull <name>` | Final frame incl. overlays/HUD/menus |
 | `<t> hash <name>` | Log FNV-1a hash of the last presented 800×600 guest frame |
-| `<t> log <text>` | Log text with current room/menu state |
+| `<t> log <text>` | Log text with current room/menu state and presented frame rate (`fps=`) |
 | `<t> expect room <prefix>` | Fail unless the active room matches |
 | `<t> expect menu` | Fail unless the main menu is shown |
 | `<t> expect hotspots <min>` | Fail unless at least `<min>` hotspots are collectable |

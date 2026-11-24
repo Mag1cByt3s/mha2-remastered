@@ -353,6 +353,23 @@ static int g_bg_dst_x = 0, g_bg_dst_y = 0;
 static const void *g_bg_orig_ptr = NULL;
 static int g_bg_active = 0;
 
+/* GPU cache of decoded HD backgrounds. Some screens blit from two different background
+ * surfaces in the same frame (e.g. the m/012 picture-difference minigame alternates
+ * objBg1/objBg2); with a single texture every switch re-decoded a 3200x1800 WebP and
+ * rebuilt its mipmaps on the GL thread (~3 fps, 100% CPU). g_bg_hd_tex/g_bg_wide_tex
+ * always alias the textures of the active entry. */
+#define BG_TEX_CACHE_SIZE 4
+typedef struct {
+    int asset_id;               /* -1 = empty */
+    GLuint hd_tex, wide_tex;
+    int hd_w, hd_h, wide_w, wide_h, wide_has;
+    uint64_t last_use;
+} BgTexEntry;
+static BgTexEntry g_bg_cache[BG_TEX_CACHE_SIZE] = {
+    { .asset_id = -1 }, { .asset_id = -1 }, { .asset_id = -1 }, { .asset_id = -1 },
+};
+static uint64_t g_bg_cache_clock = 0;
+
 /* ---- v3 Native High-Res Vector Text Cache ---- */
 static GlTextDraw g_frame_texts[MAX_FRAME_TEXT_DRAWS];
 static int g_frame_text_count = 0;
@@ -1309,8 +1326,6 @@ int gl_renderer_init(const char *title, int w, int h) {
                     p_glGenVertexArrays(1, &g_vao);
                     glGenTextures(1, &g_frame_tex);
                     glGenTextures(1, &g_bg_orig_tex);
-                    glGenTextures(1, &g_bg_hd_tex);
-                    glGenTextures(1, &g_bg_wide_tex);
                     glGenTextures(1, &g_cursor_tex);
                     g_gl_thread = pthread_self();
                     g_gl_thread_valid = 1;
@@ -1381,8 +1396,17 @@ void gl_renderer_shutdown(void) {
     if (g_toast_tex) { glDeleteTextures(1, &g_toast_tex); g_toast_tex = 0; }
     if (g_frame_tex) { glDeleteTextures(1, &g_frame_tex); g_frame_tex = 0; }
     if (g_bg_orig_tex) { glDeleteTextures(1, &g_bg_orig_tex); g_bg_orig_tex = 0; }
-    if (g_bg_hd_tex) { glDeleteTextures(1, &g_bg_hd_tex); g_bg_hd_tex = 0; }
-    if (g_bg_wide_tex) { glDeleteTextures(1, &g_bg_wide_tex); g_bg_wide_tex = 0; g_bg_wide_has = 0; }
+    for (int i = 0; i < BG_TEX_CACHE_SIZE; i++) {
+        BgTexEntry *e = &g_bg_cache[i];
+        if (e->hd_tex) glDeleteTextures(1, &e->hd_tex);
+        if (e->wide_tex) glDeleteTextures(1, &e->wide_tex);
+        memset(e, 0, sizeof(*e));
+        e->asset_id = -1;
+    }
+    g_bg_hd_tex = 0;
+    g_bg_wide_tex = 0;
+    g_bg_wide_has = 0;
+    g_bg_hd_id = -1;
     if (g_remastered_badge_tex) { glDeleteTextures(1, &g_remastered_badge_tex); g_remastered_badge_tex = 0; }
     g_remastered_badge_ink_w = g_remastered_badge_ink_h = g_remastered_badge_pad = 0;
     g_remastered_badge_tried = 0;
@@ -1507,6 +1531,72 @@ void gl_renderer_trigger_transition(void) {
     }
 }
 
+static void upload_bg_texture(GLuint tex, const HdImageRGBA *img) {
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, img->width, img->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, img->rgba);
+    p_glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
+/* Return the cache entry holding asset_id, decoding/uploading it into the least recently
+ * used slot on a miss. NULL if the asset cannot be decoded. GL thread only. */
+static BgTexEntry *bg_cache_acquire(int asset_id) {
+    BgTexEntry *victim = &g_bg_cache[0];
+    for (int i = 0; i < BG_TEX_CACHE_SIZE; i++) {
+        BgTexEntry *e = &g_bg_cache[i];
+        if (e->asset_id == asset_id) {
+            e->last_use = ++g_bg_cache_clock;
+            return e;
+        }
+        if (e->asset_id < 0 || (victim->asset_id >= 0 && e->last_use < victim->last_use)) victim = e;
+    }
+
+    const HdImageRGBA *hd = hd_assets_get_rgba(asset_id);
+    if (!hd || !hd->rgba) return NULL;
+    if (!victim->hd_tex) glGenTextures(1, &victim->hd_tex);
+    upload_bg_texture(victim->hd_tex, hd);
+    victim->asset_id = asset_id;
+    victim->hd_w = hd->width;
+    victim->hd_h = hd->height;
+    victim->last_use = ++g_bg_cache_clock;
+
+    /* Optional 16:9 widescreen extended sibling (*_wide.webp) for 4:3 menus */
+    victim->wide_has = 0;
+    HdImageRGBA wimg;
+    memset(&wimg, 0, sizeof(wimg));
+    if (hd_assets_decode_wide_rgba(asset_id, &wimg) == 0 && wimg.rgba && wimg.width > 0 && wimg.height > 0) {
+        /* Flip vertically once to match bottom-up FBO orientation used by FS_POST */
+        size_t row_bytes = (size_t)wimg.width * 4u;
+        uint8_t *tmp_row = (uint8_t *)malloc(row_bytes);
+        if (tmp_row) {
+            for (int y = 0; y < wimg.height / 2; y++) {
+                uint8_t *r0 = wimg.rgba + (size_t)y * row_bytes;
+                uint8_t *r1 = wimg.rgba + (size_t)(wimg.height - 1 - y) * row_bytes;
+                memcpy(tmp_row, r0, row_bytes);
+                memcpy(r0, r1, row_bytes);
+                memcpy(r1, tmp_row, row_bytes);
+            }
+            free(tmp_row);
+        }
+        if (!victim->wide_tex) glGenTextures(1, &victim->wide_tex);
+        upload_bg_texture(victim->wide_tex, &wimg);
+        victim->wide_w = wimg.width;
+        victim->wide_h = wimg.height;
+        victim->wide_has = 1;
+    }
+    hd_sprites_free_rgba(&wimg);
+
+    if (g_cfg.hd_assets_enabled) {
+        gl_renderer_show_toast("HD Background: %s (%dx%d)", hd_assets_get_name(asset_id), victim->hd_w, victim->hd_h);
+    }
+    return victim;
+}
+
 /* ---- HD Background Activation (supports both 800x600 menus and 800x450 rooms!) ---- */
 void gl_renderer_set_hd_background(int asset_id, const void *orig_pixels,
                                    int w, int h, int pitch, int bpp,
@@ -1520,61 +1610,20 @@ void gl_renderer_set_hd_background(int asset_id, const void *orig_pixels,
 
     int need_orig_upload = (g_bg_hd_id != asset_id) || (g_bg_orig_ptr != orig_pixels);
     if (g_bg_hd_id != asset_id) {
-        const HdImageRGBA *hd = hd_assets_get_rgba(asset_id);
-        if (!hd || !hd->rgba) {
+        BgTexEntry *e = bg_cache_acquire(asset_id);
+        if (!e) {
             g_bg_active = 0;
             g_bg_is_main_menu = 0;
             return;
         }
-        glBindTexture(GL_TEXTURE_2D, g_bg_hd_tex);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, hd->width, hd->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, hd->rgba);
-        p_glGenerateMipmap(GL_TEXTURE_2D);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        g_bg_hd_tex = e->hd_tex;
+        g_bg_hd_w = e->hd_w;
+        g_bg_hd_h = e->hd_h;
+        g_bg_wide_tex = e->wide_tex;
+        g_bg_wide_w = e->wide_w;
+        g_bg_wide_h = e->wide_h;
+        g_bg_wide_has = e->wide_has;
         g_bg_hd_id = asset_id;
-        g_bg_hd_w = hd->width;
-        g_bg_hd_h = hd->height;
-
-        /* Load optional 16:9 widescreen extended sibling (*_wide.webp) for 4:3 menus */
-        g_bg_wide_has = 0;
-        HdImageRGBA wimg;
-        memset(&wimg, 0, sizeof(wimg));
-        if (hd_assets_decode_wide_rgba(asset_id, &wimg) == 0 && wimg.rgba && wimg.width > 0 && wimg.height > 0) {
-            /* Flip vertically once to match bottom-up FBO orientation used by FS_POST */
-            size_t row_bytes = (size_t)wimg.width * 4u;
-            uint8_t *tmp_row = (uint8_t *)malloc(row_bytes);
-            if (tmp_row) {
-                for (int y = 0; y < wimg.height / 2; y++) {
-                    uint8_t *r0 = wimg.rgba + (size_t)y * row_bytes;
-                    uint8_t *r1 = wimg.rgba + (size_t)(wimg.height - 1 - y) * row_bytes;
-                    memcpy(tmp_row, r0, row_bytes);
-                    memcpy(r0, r1, row_bytes);
-                    memcpy(r1, tmp_row, row_bytes);
-                }
-                free(tmp_row);
-            }
-            glBindTexture(GL_TEXTURE_2D, g_bg_wide_tex);
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, wimg.width, wimg.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, wimg.rgba);
-            p_glGenerateMipmap(GL_TEXTURE_2D);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            g_bg_wide_w = wimg.width;
-            g_bg_wide_h = wimg.height;
-            g_bg_wide_has = 1;
-            hd_sprites_free_rgba(&wimg);
-        }
-
-        if (g_cfg.hd_assets_enabled) {
-            gl_renderer_show_toast("HD Background: %s (%dx%d)", hd_assets_get_name(asset_id), g_bg_hd_w, g_bg_hd_h);
-        }
     }
 
     if (need_orig_upload) {
@@ -2626,6 +2675,10 @@ static void draw_osd_quad_f(GLuint tex, float x_px, float y_px, float w_px, floa
 void draw_osd_quad(GLuint tex, int x_px, int y_px, int w_px, int h_px,
                           int draw_w, int draw_h, float alpha) {
     draw_osd_quad_f(tex, (float)x_px, (float)y_px, (float)w_px, (float)h_px, draw_w, draw_h, alpha);
+}
+
+float gl_renderer_current_fps(void) {
+    return g_cur_fps;
 }
 
 static void gl_draw_frame_common(int src_w, int src_h, int src_bpp) {

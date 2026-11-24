@@ -449,7 +449,8 @@ static void exec_event(const ReplayEvent *e, uint32_t t) {
         break;
     }
     case RE_LOG:
-        fprintf(stderr, "[replay] log %s (room=%s menu=%d detector=%d)\n", e->s, cur_room(), menu_active(), game_is_main_menu_active());
+        fprintf(stderr, "[replay] log %s (room=%s menu=%d detector=%d fps=%.0f)\n", e->s, cur_room(), menu_active(),
+                game_is_main_menu_active(), (double)gl_renderer_current_fps());
         break;
     case RE_HOTSPOTS: {
         static const char *kinds[] = { "object", "exit", "npc" };
