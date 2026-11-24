@@ -64,7 +64,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 
 ### Root, Build & Documentation
 - `Makefile`, `shell.nix`: Build rules (`-MMD -MP`, `?= ` overrides) and NixOS shell environment (`MHA2_FONT_PATH`, `MHA2_GAME_FONT_PATH`, `python3` + `capstone`, SDL2, FFmpeg, GL, `dejavu_fonts`).
-- `play.sh`: Local NixOS launcher forwarding CLI arguments safely (`$@`).
+- `play.sh`: Universal launcher (any distro; `nix-shell` when available): runs `tools/update.sh`, then `./mha2_linux` with all arguments (`--no-update` is consumed); passes the update notice via `MHA2_UPDATE_NOTICE`.
 - `LICENSE`, `README.md`, `CHANGELOG.md`, `docs/images/`: MIT License (clean-room code/tooling only), bilingual README (**German `#deutsch` first, clickable English `#english` below**), `v1`–`v5.4` changelog, `1280×640` repo banner (`docs/images/banner.png`), and showcase screenshots (`remaster_showcase_*.png`).
 
 ### Static Recompiler (`recomp/`)
@@ -100,9 +100,11 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 - `tools/upscale_videos.py`, `tools/remaster_videos_4k.py`: Cutscene upscalers (`game_files/*.avi` → `hd_assets/videos/*.mp4` via Real-ESRGAN Video or streaming RTX `4x-ClearRealityV1` pipeline).
 - `tools/polish_cursors.py`, `tools/compress_hd_lossless.py`: SDF vector-clean cursor polisher (`cu*` & `mc*`, reading `.bak_raw` backups for idempotency) and parallel bit-exact lossless WebP recompressor.
 - `tools/install_desktop.sh`: Local NixOS launcher icon (`walkS_f000.webp`) & `.desktop` installer.
+- `tools/update.sh`: automatic updater for `git clone` installs (newest `vX.Y[.Z]` release tag, fast-forward only, save/settings backup to `backups/update-*`, incremental re-lift/rebuild, `build/update.log`). Tested by `tests/test_update.sh`.
 - `tools/regress.sh` (`make regress`): headless sandboxed replay regression runner (fresh `--game-dir` sandbox per script, local RMSE baselines in `work/regress_baseline/`, `--strict-mem`, `#! threshold` per-shot overrides, `MHA2_BIN` override).
 
 ### Tests & Docs (`tests/`, `docs/`)
+- `tests/test_update.sh` (`make test`): updater scenarios on throwaway git repos with a stub build.
 - `tests/test_*.c` (`make test`): guest sync, guest memory & crash reports, x86 semantics (div/idiv vs `__int128`, `FIST` vs host x87, `nf_*` vs `alu_*`), input bindings, text wrap.
 - `tests/replay/*.rec`: replay scripts (boot, new game, overlays, quick save, controls, controller, overlay text, Tab focus after loading).
 - `docs/REPLAY.md` (script syntax), `docs/INSTALL.md` (split release), `docs/STEAM_DECK.md`, `docs/PLAN.md` (engineering plan/status).
@@ -170,6 +172,11 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 
 13. **Hotkeys (`runtime/input_bindings.c`):** all remaster hotkeys go through `bindings_match_key()`/`perform_action()`; Escape, Alt+F4, Alt+Enter and pad A/B/Start stay fixed. Press chords require exact Ctrl/Alt so plain letters typed into savegame names never trigger actions. UI hints use `bindings_describe()`.
 
+14. **Updater & Player Data (`tools/update.sh`, `play.sh`):**
+    - Players' installs are git checkouts updated to the newest **release tag** (`vMAJOR.MINOR[.PATCH]`; other tag styles are ignored). Untagged commits on `main` never reach players.
+    - Everything a player owns must stay gitignored (`game_files/` incl. `mha2.sav/`, `mha2_settings.ini`, `hd_assets/`, `backups/`); never move player data into tracked paths and never add tracked files the game writes at runtime.
+    - Keep both scripts wrapped in `main "$@"; exit $?` (git may rewrite them while they run). `tools/update.sh` prints nothing on stdout except the in-game notice line. Persist new ini keys in `gl_config_load/save()`, otherwise the game drops them on the next settings save (cf. `auto_update`).
+
 ## 5. Common Development Workflows
 
 ### Adding a New Game Patch / Hook
@@ -188,6 +195,14 @@ nix-shell --run "tools/regress.sh --strict-mem" # replay suite, headless & sandb
 nix-shell --run "tools/regress.sh --update-baseline"  # after an intentional visual change
 ```
 Never point replays at the real `game_files/` save folder; `tools/regress.sh` sandboxes automatically.
+
+### Publishing a Release (reaches players automatically)
+```bash
+nix-shell --run "make test && tools/regress.sh"   # everything green
+# CHANGELOG.md: new "## [vX.Y.Z — …]" section, commit, push main
+git tag -m "vX.Y.Z" vX.Y.Z && git push origin vX.Y.Z
+```
+Players' `./play.sh` installs the tag on their next launch. Never move or delete a published tag; publish a new patch version instead.
 
 ### Refreshing HD Caches or Portable Release Bundles
 - If modifying files under `hd_assets/`, delete `.hd_index.cache` and/or `.hd_sprite_index.cache` so the runtime rebuilds the indexes cleanly.

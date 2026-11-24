@@ -37,6 +37,13 @@ The engine uses them whenever `game_files/` / `hd_assets/` are not present next 
 working directory, so several runtime versions can share one data set. Command-line
 overrides: `--game-dir <dir>`, `--hd-dir <dir>`.
 
+## Updates
+
+The tarball releases do not update themselves. Installs made with
+`git clone https://github.com/Mag1cByt3s/mha2-remastered.git` and started with `./play.sh`
+update automatically to every new release tag (saves and settings are kept and backed
+up; see the README section "Automatic Updates").
+
 ## Getting the game files
 
 Use `tools/extract_game.py` from the source repository to extract the files from the

@@ -153,9 +153,21 @@ python3 tools/extract_game.py '/pfad/zu/Setup.EXE' -o game_files
 # 2. mha2.exe liften und das native x86_64-Binary kompilieren:
 make lift && make -j"$(nproc)"
 
-# 3. Starten:
-./mha2_linux
+# 3. Starten (prüft vorher automatisch auf Updates, siehe unten):
+./play.sh
 ```
+
+<br>
+
+### Automatische Updates
+
+Wer das Projekt per `git clone https://github.com/Mag1cByt3s/mha2-remastered.git` installiert hat und mit `./play.sh` startet, bekommt neue Versionen automatisch:
+
+- Vor jedem Start prüft [tools/update.sh](tools/update.sh) (max. 20 s, offline wird einfach übersprungen), ob ein neues **Release** (Git-Tag `vX.Y.Z`) veröffentlicht wurde, aktualisiert den Quellcode und kompiliert neu. Danach erscheint im Hauptmenü kurz *„Updated to vX.Y.Z“*.
+- **Spielstände, Einstellungen, Spieldateien und HD-Assets bleiben unverändert** (`game_files/`, `mha2_settings.ini`, `hd_assets/` sind nicht Teil des Repositorys). Zusätzlich werden Spielstände und Einstellungen vor jedem Update nach `backups/update-…/` gesichert (die letzten 10).
+- Eigene Änderungen am Code werden nie überschrieben – dann wird das Update nur gemeldet. Schlägt das Kompilieren fehl, startet die vorherige Version weiter (Log: `build/update.log`).
+- Abschalten: `./play.sh --no-update`, `MHA2_NO_UPDATE=1` oder `auto_update=0` in `mha2_settings.ini`. Manuell: `tools/update.sh`.
+- Einmalig für ältere Installationen (ohne Updater): `git pull && ./play.sh`.
 
 <br>
 
@@ -206,6 +218,7 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ./play.sh --16bit --no-hd-assets --no-hd-sprites --no-hd-text --no-bloom --grade original  # Purer 2005er-Look
 ./play.sh --record sitzung.rec                  # Eingaben aufzeichnen; --replay sitzung.rec spielt sie ab
 ./play.sh --strict-mem                          # Debug: Gast-NULL-Zeiger-Zugriffe sofort melden
+./play.sh --no-update                           # ohne Update-Prüfung starten
 ```
 
 <br>
@@ -403,9 +416,21 @@ python3 tools/extract_game.py '/path/to/Setup.EXE' -o game_files
 # 2. Lift mha2.exe to C and build the native x86_64 executable:
 make lift && make -j"$(nproc)"
 
-# 3. Launch:
-./mha2_linux
+# 3. Launch (checks for updates first, see below):
+./play.sh
 ```
+
+<br>
+
+### Automatic Updates
+
+If you installed via `git clone https://github.com/Mag1cByt3s/mha2-remastered.git` and start the game with `./play.sh`, new versions arrive automatically:
+
+- Before every launch, [tools/update.sh](tools/update.sh) checks (at most 20 s; offline is simply skipped) whether a new **release** (git tag `vX.Y.Z`) was published, updates the source and rebuilds. The main menu then briefly shows *"Updated to vX.Y.Z"*.
+- **Savegames, settings, game files and HD assets are never touched** (`game_files/`, `mha2_settings.ini`, `hd_assets/` are not part of the repository). On top of that, saves and settings are backed up to `backups/update-…/` before every update (the last 10 are kept).
+- Your own code changes are never overwritten — the update is only reported then. If the build fails, the previous version keeps running (log: `build/update.log`).
+- Turn it off: `./play.sh --no-update`, `MHA2_NO_UPDATE=1`, or `auto_update=0` in `mha2_settings.ini`. Manually: `tools/update.sh`.
+- One time for older installs (without the updater): `git pull && ./play.sh`.
 
 <br>
 
@@ -456,6 +481,7 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ./play.sh --16bit --no-hd-assets --no-hd-sprites --no-hd-text --no-bloom --grade original  # Pure 2005 look
 ./play.sh --record session.rec                  # record input; --replay session.rec plays it back
 ./play.sh --strict-mem                          # debug: report guest NULL-pointer accesses immediately
+./play.sh --no-update                           # start without the update check
 ```
 
 <br>

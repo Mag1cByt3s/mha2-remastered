@@ -1,5 +1,6 @@
 CC       ?= gcc
 PKG_CFG  ?= pkg-config
+BUILD_DIR ?= build
 PKG_DEPS := sdl2 SDL2_ttf libavformat libavcodec libswscale libavutil gl
 
 SDL_CFLAGS ?= $(shell $(PKG_CFG) --cflags $(PKG_DEPS))
@@ -15,7 +16,7 @@ endif
 endif
 
 CFLAGS_COMMON := -O2 -Iruntime -Irecomp/gen -fno-strict-aliasing -MMD -MP
-CFLAGS_RT     := $(CFLAGS_COMMON) -Wall -Wextra $(SDL_CFLAGS)
+CFLAGS_RT     := $(CFLAGS_COMMON) -I$(BUILD_DIR) -Wall -Wextra $(SDL_CFLAGS)
 CFLAGS_GEN    := $(CFLAGS_COMMON) -Wno-unused-label -Wno-unused-variable -Wno-parentheses
 # -rdynamic exports sub_<VA> symbols so crash backtraces name the guest functions
 LDFLAGS       := $(SDL_LIBS) -lpthread -lm -rdynamic
@@ -44,7 +45,6 @@ RT_SRCS := \
 
 GEN_SRCS := recomp/gen/dispatch.c $(wildcard recomp/gen/chunk_*.c)
 
-BUILD_DIR ?= build
 RT_OBJS   := $(patsubst runtime/%.c,$(BUILD_DIR)/rt_%.o,$(RT_SRCS))
 GEN_OBJS  := $(patsubst recomp/gen/%.c,$(BUILD_DIR)/gen_%.o,$(GEN_SRCS))
 RT_DEPS   := $(RT_OBJS:.o=.d)
@@ -52,7 +52,13 @@ GEN_DEPS  := $(GEN_OBJS:.o=.d)
 
 TARGET ?= mha2_linux
 
-.PHONY: all clean lift test regress
+# Engine version from the newest release tag (vMAJOR.MINOR[.PATCH]), e.g. v5.5.0 or
+# v5.5.0-3-gabc1234-dirty between releases. Override: make MHA2_VERSION=... (e.g. in
+# containers without .git). build/version.h is only rewritten when the value changes, so
+# a new version recompiles runtime/main.c alone.
+MHA2_VERSION ?= $(shell git describe --tags --match 'v[0-9]*.[0-9]*' --always --dirty 2>/dev/null || echo unknown)
+
+.PHONY: all clean lift test regress FORCE
 
 all: $(TARGET)
 
@@ -61,6 +67,12 @@ lift:
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+$(BUILD_DIR)/version.h: FORCE | $(BUILD_DIR)
+	@printf '#define MHA2_VERSION "%s"\n' '$(MHA2_VERSION)' > $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
+
+$(BUILD_DIR)/rt_main.o: $(BUILD_DIR)/version.h
 
 $(BUILD_DIR)/rt_%.o: runtime/%.c runtime/cpu.h runtime/runtime.h runtime/gl_renderer.h runtime/gl_internal.h runtime/hd_assets.h recomp/gen/imports.h recomp/gen/funcs.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS_RT) -c $< -o $@
@@ -79,6 +91,7 @@ TEST_CFLAGS := -O2 -g -Wall -Wextra -Iruntime
 
 test: $(TESTS)
 	@set -e; for t in $(TESTS); do echo "== $$t"; $$t; done
+	@tests/test_update.sh
 
 $(BUILD_DIR)/test_guest_sync: tests/test_guest_sync.c runtime/guest_sync.c runtime/cpu.h | $(BUILD_DIR)
 	$(CC) $(TEST_CFLAGS) tests/test_guest_sync.c runtime/guest_sync.c -o $@ -lpthread

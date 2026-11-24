@@ -4,6 +4,21 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
+## [v5.5 — Automatic Updates] (2026-11-24)
+
+### New Features
+- **Automatic Updates for `git clone` Installs (`./play.sh`, `tools/update.sh`)**: before every launch the updater fetches release tags (`vMAJOR.MINOR[.PATCH]`, at most 20 s, offline is skipped), fast-forwards to the newest release, re-lifts only when `recomp/lift.py` changed and rebuilds incrementally; the main menu shows *"Updated to vX.Y.Z"*. Savegames, settings, game files and HD assets are gitignored and never touched, and are additionally backed up to `backups/update-…/` (last 10) before each update. Local code changes or local commits are never overwritten; a failed build keeps the previous binary and retries on the next launch. Off switch: `--no-update`, `MHA2_NO_UPDATE=1` or `auto_update=0` (now persisted by the engine).
+- **`play.sh` for Every Distro**: uses `nix-shell` only when available, otherwise runs the system toolchain.
+- **Engine Version**: embedded from `git describe` (`build/version.h`), shown in the startup log and the `F1` menu title.
+
+### Testing
+- `tests/test_update.sh` (part of `make test`): 30 checks on throwaway git repositories — tags-only channel, version ordering, offline, local changes/commits, broken release, self-updating updater, save backups.
+
+### Upgrading
+- Installs from before v5.5 have no updater yet: run `git pull` once, then always start with `./play.sh`.
+
+---
+
 ## [v5.4.1 — Picture-Difference Minigame Performance & Tab Focus Crash] (2026-11-24)
 
 ### Fixes

@@ -8,6 +8,7 @@
 #include "hd_assets.h"
 #include "imports.h"
 #include "funcs.h"
+#include "version.h"
 #include <sys/stat.h>
 #include <sched.h>
 
@@ -78,6 +79,10 @@ static void print_help(const char *prog) {
     printf("  F11 or Alt+Enter         Toggle borderless fullscreen\n");
     printf("  F12                      Cycle Widescreen Aspect (Auto / 16:10 / 16:9 / 4:3)\n");
     printf("  Ctrl+L                   Open/Close Dialog & Clue History Log\n");
+}
+
+const char *mha2_version(void) {
+    return MHA2_VERSION;
 }
 
 int main(int argc, char **argv) {
@@ -242,13 +247,16 @@ int main(int argc, char **argv) {
             perror("[MHA2] --strict-mem: mprotect");
     }
 
-    fprintf(stderr, "[MHA2] Launching Remastered v5 Engine (%s, %s, %s, HD-Bg:%d, HD-Sprites:%d, game_dir='%s')...\n",
+    fprintf(stderr, "[MHA2] Launching Remastered Engine %s (%s, %s, %s, HD-Bg:%d, HD-Sprites:%d, game_dir='%s')...\n",
+            MHA2_VERSION,
             g_cfg.truecolor_32bit ? "32-bit TrueColor" : "16-bit RGB565",
             gl_shader_name(g_cfg.shader_mode),
             gl_vsync_name(g_cfg.vsync_mode),
             hd_assets_count(),
             hd_sprites_count(),
             g_game_dir);
+    const char *update_notice = getenv("MHA2_UPDATE_NOTICE"); /* set by play.sh after tools/update.sh */
+    if (update_notice && update_notice[0]) gl_renderer_set_startup_notice(update_notice);
 
     push32(&main_ctx, HLE_RET_SENTINEL);
     dispatch_call(&main_ctx, MHA2_ENTRY_VA);

@@ -849,7 +849,12 @@ static void render_menu_texture(int draw_w, int draw_h) {
     SDL_Color col_dim    = { 155, 162, 178, 255 };
 
     if (f_title) {
-        SDL_Surface *t = TTF_RenderUTF8_Blended(f_title, "REMASTER v5  -  GRAPHICS & ENGINE SETTINGS", col_gold);
+        char title[96];
+        const char *ver = mha2_version();
+        int ver_len = (int)strcspn(ver, "-"); /* "v5.5.0-3-gabc1234-dirty" -> "v5.5.0" */
+        if (ver[0] != 'v') { ver = "dev"; ver_len = 3; } /* no release tag in the history */
+        snprintf(title, sizeof(title), "REMASTER %.*s  -  GRAPHICS & ENGINE SETTINGS", ver_len, ver);
+        SDL_Surface *t = TTF_RenderUTF8_Blended(f_title, title, col_gold);
         if (t) {
             SDL_Rect dst = { (pw - t->w) / 2, bw + (hdr_h - t->h) / 2, t->w, t->h };
             SDL_BlitSurface(t, NULL, surf, &dst);

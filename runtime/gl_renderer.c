@@ -51,6 +51,7 @@ ModernConfig g_cfg = {
     .video_enhance      = 1,
     .display_index      = 0,
     .overlay_text_scale = 100,
+    .auto_update        = 1,
     .hd_assets_dir      = "hd_assets",
 };
 
@@ -142,6 +143,7 @@ void gl_config_load(const char *path) {
         else if (strcmp(p, "scene_transitions") == 0) g_cfg.scene_transitions = atoi(val) ? 1 : 0;
         else if (strcmp(p, "video_enhance") == 0) g_cfg.video_enhance = atoi(val) ? 1 : 0;
         else if (strcmp(p, "overlay_text_scale") == 0) g_cfg.overlay_text_scale = clamp_i(atoi(val), 100, 200);
+        else if (strcmp(p, "auto_update") == 0) g_cfg.auto_update = atoi(val) ? 1 : 0;
         else if (strcmp(p, "display_index") == 0) g_cfg.display_index = clamp_i(atoi(val), 0, 15);
     }
     fclose(f);
@@ -187,6 +189,7 @@ void gl_config_save(const char *path) {
     fprintf(f, "scene_transitions=%d\n", g_cfg.scene_transitions);
     fprintf(f, "video_enhance=%d\n", g_cfg.video_enhance);
     fprintf(f, "overlay_text_scale=%d\n", g_cfg.overlay_text_scale);
+    fprintf(f, "auto_update=%d\n", g_cfg.auto_update);
     fprintf(f, "display_index=%d\n", g_cfg.display_index);
     bindings_ini_write(f);
     fclose(f);
@@ -1433,6 +1436,12 @@ int gl_renderer_is_active(void) { return g_gl_active; }
 
 int gl_renderer_is_gl_thread(void) {
     return g_gl_active && g_gl_thread_valid && pthread_equal(pthread_self(), g_gl_thread);
+}
+
+static char g_startup_notice[160];
+
+void gl_renderer_set_startup_notice(const char *text) {
+    snprintf(g_startup_notice, sizeof(g_startup_notice), "%s", text ? text : "");
 }
 
 void gl_renderer_show_toast(const char *fmt, ...) {
@@ -2683,6 +2692,22 @@ float gl_renderer_current_fps(void) {
 
 static void gl_draw_frame_common(int src_w, int src_h, int src_bpp) {
     uint32_t now_ms = SDL_GetTicks();
+    if (g_startup_notice[0]) {
+        /* wait until the main menu has been up for a moment: the "HD Background" toast
+           fired on menu entry would otherwise overwrite the notice immediately */
+        static uint32_t s_menu_since = 0;
+        const char *room = hd_sprites_room_prefix();
+        int on_menu = game_is_main_menu_active() || (room && strcmp(room, "x/001/") == 0);
+        if (!on_menu) {
+            s_menu_since = 0;
+        } else if (!s_menu_since) {
+            s_menu_since = now_ms ? now_ms : 1u;
+        } else if (now_ms - s_menu_since >= 1200u) {
+            gl_renderer_show_toast("%s", g_startup_notice);
+            g_toast_until = SDL_GetTicks() + 5000u;
+            g_startup_notice[0] = '\0';
+        }
+    }
     uint64_t now_ns_frame = mono_ns();
     g_fps_frames++;
     if (g_fps_window_start == 0) g_fps_window_start = now_ms;

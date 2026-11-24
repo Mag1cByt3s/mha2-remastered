@@ -126,6 +126,7 @@ typedef struct GameHotspot {
 } GameHotspot;
 int  game_collect_room_hotspots(GameHotspot *out, int max_out);
 int  game_is_main_menu_active(void);
+const char *mha2_version(void); /* git describe of the build, e.g. "v5.5.0" (runtime/main.c) */
 int  win32_ddraw_dispatch(CpuCtx *c, uint32_t import_id);
 void com_ddraw_dispatch(CpuCtx *c, uint32_t iface_id, uint32_t slot);
 

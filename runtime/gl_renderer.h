@@ -161,6 +161,7 @@ typedef struct ModernConfig {
     int video_enhance;      /* F1: GPU deblocking + sharpening on FMV cutscenes */
     int display_index;      /* F1: target monitor index for multi-monitor fullscreen (0=Display 1) */
     int overlay_text_scale; /* F1: % size of remaster overlay text (dialog log, hotspot labels, toasts) */
+    int auto_update;        /* ini only: 0 = play.sh / tools/update.sh skip the release check (runtime just persists it) */
     char hd_assets_dir[512];/* default "hd_assets" */
 } ModernConfig;
 
@@ -230,6 +231,8 @@ void gl_renderer_toggle_hd_text(void);
 void gl_renderer_toggle_hd_assets(void);
 void gl_renderer_toggle_decoupled_cursor(void);
 void gl_renderer_show_toast(const char *fmt, ...);
+/* Toast shown once, as soon as the main menu is visible (e.g. "Updated to v5.5.0" from play.sh). */
+void gl_renderer_set_startup_notice(const char *text);
 
 int  gl_menu_is_open(void);
 void gl_menu_toggle(void);
