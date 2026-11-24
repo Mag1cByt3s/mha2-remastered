@@ -4,9 +4,11 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
-## [v5.4.1 — Picture-Difference Minigame Performance] (2026-11-24)
+## [v5.4.1 — Picture-Difference Minigame Performance & Tab Focus Crash] (2026-11-24)
 
 ### Fixes
+- **Crash / Phantom Buttons when pressing `Tab` after Loading a Game (original 2005 bug)**: loading from the *Kapitelauswahl* screen (`Laden`) closed it without restoring the GUI focus root (the `Escape` path does), so `Tab` in the room kept cycling the closed screen's **invisible** slots and buttons — the cursor jumped to empty spots and the bottom row (where *Neues Spiel / Speichern / Laden / Hauptmenü* sit over the inventory). `Tab` together with `Space`/`Enter` in the same input batch then "activated" them: a slot crashed with `indirect call to unlifted address 0x00000000 (ret=0x00411863)`, a bottom button could silently start *Neues Spiel* or leave to the main menu. Two `GUEST_BUGFIX_INSERTS` (`recomp/lift.py`): a detached focus root gets no keyboard focus handling (`0x004427cf`), and the save screen ignores messages while closed (`0x004115af`). Regression test `tests/replay/tab_focus.rec`.
+- **`tools/regress.sh` sandbox leak**: the sandbox symlinked every file of `game_files/` except `mha2.sav/`, so the quick save test wrote the real `mha2_quicksave.id` through the link (a later real `Ctrl+S` then refused to overwrite the player's own quick save). Per-player files (`mha2_quicksave.id`, `*.ini`, `*.log`) are no longer linked.
 - **Lag & 100% CPU in the Dining-Room Picture Minigame (`m/012`)**: the game blits from two different background surfaces every frame (`objBg1`/`objBg2`), but the renderer kept only one HD background texture — every switch re-decoded a 3200×1800 WebP and rebuilt its mipmaps on the render thread (4 fps in the close-up, zoom animation crawling). HD backgrounds now live in a 4-entry GPU texture cache (`runtime/gl_renderer.c`, LRU, includes `*_wide` siblings); switching between cached backgrounds is a texture bind (≈2 decodes per visit instead of ~3 per second).
 
 ### Testing

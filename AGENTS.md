@@ -104,7 +104,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 
 ### Tests & Docs (`tests/`, `docs/`)
 - `tests/test_*.c` (`make test`): guest sync, guest memory & crash reports, x86 semantics (div/idiv vs `__int128`, `FIST` vs host x87, `nf_*` vs `alu_*`), input bindings, text wrap.
-- `tests/replay/*.rec`: replay scripts (boot, new game, overlays, quick save, controls, controller, overlay text).
+- `tests/replay/*.rec`: replay scripts (boot, new game, overlays, quick save, controls, controller, overlay text, Tab focus after loading).
 - `docs/REPLAY.md` (script syntax), `docs/INSTALL.md` (split release), `docs/STEAM_DECK.md`, `docs/PLAN.md` (engineering plan/status).
 
 ---
@@ -161,7 +161,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 11. **Lifter Rewrites & Flag Liveness (`recomp/lift.py`):**
     - `ATOMIC_COUNTER_GLOBALS` (`0x0051b3b8`) must keep raising on unrecognized accesses; every lifted `mov/inc|dec/mov` is one atomic RMW and every other store a `guest_spin_acquire()`. Native `Lock`/`TryLock` patches must use `guest_owner_lock_enter/leave()` (same protocol).
     - `flag_effects()` kill sets must mirror exactly what each `alu_*` helper writes *unconditionally* (shift/rotate by CL or 0 and `rep cmps/scas` are may-defs; `inc/dec` keep CF; shifts write OF only for count 1). After touching ALU helpers or flag handling, re-validate with `MHA2_LIFT_FLAGCHECK=1 make lift` + `MHA2_BIN=… tools/regress.sh --strict-mem`; `MHA2_LIFT_NOFLAGELIM=1` disables elimination.
-    - `GUEST_BUGFIX_INSERTS` code runs before the instruction (after its label) and counts as an all-flags-live point.
+    - `GUEST_BUGFIX_INSERTS` code runs before the instruction (after its label) and counts as an all-flags-live point; it may `goto` an existing branch-target label of the same function (`L_<va>`, check `recomp/gen/`).
 
 12. **Input Injection (`runtime/input_replay.c`):**
     - Never `SDL_PushEvent` an `SDL_TEXTINPUT` (sdl2-compat crashes); use `win32_input_text()`. Injected key/pad events carry the real window ID and are recognized via the signature FIFO.

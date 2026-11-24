@@ -1,0 +1,96 @@
+# Stale Tab focus after loading a game (original 2005 bug, fixed in recomp/lift.py):
+# loading from the Kapitelauswahl screen left the GUI focus root on the closed screen, so
+# Tab cycled its invisible slots/buttons in the room and Tab + Space/Enter in the same
+# input batch "activated" a slot -> crash at 0x0041185d. New game -> l/001 -> quick save
+# -> quick load -> Tab together with Space/Enter must not crash and must stay in l/001.
+wait video 60
+1000 tap Escape
+wait menu 60
+1500 click 60 553
+wait room x/006 30
+1500 click 114 566
++2000 tap Escape
+wait room l/001 30
+2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++11000 expect hotspots 15
++0 key down Left Ctrl
++50 tap S
++100 key up Left Ctrl
+3000 expect room l/001
++0 savecheck 9
++0 key down Left Ctrl
++50 tap O
++100 key up Left Ctrl
+wait room l/001 30
+2000 log reloaded
++300 key down Tab
++0 key down Space
++50 key up Tab
++0 key up Space
++300 key down Tab
++0 key down Return
++50 key up Tab
++0 key up Return
++300 key down Tab
++0 key down Space
++50 key up Tab
++0 key up Space
++300 key down Tab
++0 key down Return
++50 key up Tab
++0 key up Return
++300 key down Tab
++0 key down Space
++50 key up Tab
++0 key up Space
++300 key down Tab
++0 key down Return
++50 key up Tab
++0 key up Return
++300 key down Tab
++0 key down Space
++50 key up Tab
++0 key up Space
++300 key down Tab
++0 key down Return
++50 key up Tab
++0 key up Return
++300 key down Tab
++0 key down Space
++50 key up Tab
++0 key up Space
++300 key down Tab
++0 key down Return
++50 key up Tab
++0 key up Return
++300 key down Tab
++0 key down Space
++50 key up Tab
++0 key up Space
++300 key down Tab
++0 key down Return
++50 key up Tab
++0 key up Return
++300 key down Tab
++0 key down Space
++50 key up Tab
++0 key up Space
++300 key down Tab
++0 key down Return
++50 key up Tab
++0 key up Return
++300 key down Tab
++0 key down Space
++50 key up Tab
++0 key up Space
++300 key down Tab
++0 key down Return
++50 key up Tab
++0 key up Return
++1000 expect room l/001
++0 shot 01_after_tabs
++500 quit

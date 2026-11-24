@@ -1072,6 +1072,29 @@ GUEST_BUGFIX_INSERTS = {
         "c->ebx = pop32(c); c->edi = pop32(c); c->esi = pop32(c); c->ebp = pop32(c); "
         "c->esp += 4u; return; } /* bugfix: no available item, skip instead of arr[-1] */"
     ),
+    # 0x00442700 GUI focus manager, per-frame keyboard loop (this = esi; +0x1c focused
+    # element, +0x24 Tab-navigation root, element +0xc = parent). Loading a game from the
+    # "Kapitelauswahl" save screen (x/006 -> "Laden") closes the screen without restoring
+    # the root (the Escape path does), so Tab keeps cycling the detached screen's invisible
+    # slots/buttons in the room and Enter/Space/click "activates" them -> slot-select
+    # message to the closed screen -> virtual call through its NULL +0x1c (crash at
+    # 0x0041185d). A detached root (parent == NULL) gets no keyboard focus handling until
+    # the next screen installs a new root.
+    0x004427CF: (
+        "{ uint32_t _root = mem_r32(c->esi + 0x24u); "
+        "if (_root != 0u && mem_r32(_root + 0xcu) == 0u) { static uint32_t _logged; "
+        "if (_logged != _root) { _logged = _root; fprintf(stderr, \"[fix] GUI focus root 0x%08x is detached "
+        "(screen closed by loading a game) - keyboard focus disabled until the next screen\\n\", _root); } "
+        "goto L_0044292b; } } /* bugfix: stale Tab-navigation root */"
+    ),
+    # 0x004115a0 save-screen (singleton 0x00526a28) message handler, this = screen + 8.
+    # Defence in depth for the bug above: messages while the screen is closed (+0x1c ==
+    # NULL) are consumed instead of reaching code that dereferences the screen.
+    0x004115AF: (
+        "if (mem_r32(c->esi - 8u + 0x1cu) == 0u) { fprintf(stderr, \"[fix] ignored message %u "
+        "to the closed save screen\\n\", mem_r32(c->eax + 0x20u)); goto L_004116de; } "
+        "/* bugfix: message to closed save screen */"
+    ),
 }
 
 # Guest globals used as hand-rolled InterlockedIncrement-style spinlock counters

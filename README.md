@@ -107,7 +107,7 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
   - Alle Remaster-Tastenkürzel mit je zwei Tastenkombinationen; Controller-Tasten über `pad_*` in `mha2_settings.ini`. Zusätzlich skalierbare Overlay-Texte (Dialogverlauf mit Zeilenumbruch, Hotspot-Beschriftungen, Hinweise; `100–200 %`).
 
 - **Behobene Fehler des Originalspiels & robuste Laufzeit**:
-  - Atomarer Ersatz für den in sieben `ObjMutex`-Methoden inline kopierten, nicht-atomaren Spinlock (inkl. erzwungenem Lock-Diebstahl), Absturz bei zufälliger Ambient-Variante ohne geladene Ressource (`0x0042a820`), Hotspot-Hervorhebung in 11 Raum- und 5 Minispiel-Unterklassen, korrekte x87-`FIST`/`#DE`-Semantik.
+  - Atomarer Ersatz für den in sieben `ObjMutex`-Methoden inline kopierten, nicht-atomaren Spinlock (inkl. erzwungenem Lock-Diebstahl), Absturz bei zufälliger Ambient-Variante ohne geladene Ressource (`0x0042a820`), Hotspot-Hervorhebung in 11 Raum- und 5 Minispiel-Unterklassen, Absturz bzw. unsichtbare Phantom-Knöpfe bei `Tab` nach dem Laden eines Spielstands (Fokus blieb auf dem geschlossenen Speicherbildschirm), korrekte x87-`FIST`/`#DE`-Semantik.
   - Abstürze schreiben einen Bericht mit Gastadresse, Registern und Gast-Aufrufstapel nach `mha2_crash.log`; `--strict-mem` schützt die Gast-NULL-Seite zur Fehlersuche.
 
 - **Tests & Regressionen** ([docs/REPLAY.md](docs/REPLAY.md)):
@@ -357,7 +357,7 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
   - Every remaster hotkey takes two key chords; controller buttons via `pad_*` in `mha2_settings.ini`. Plus scalable overlay text (word-wrapped dialog log, hotspot labels, toasts; `100–200%`).
 
 - **Original-Game Bugfixes & a Hardened Runtime**:
-  - Atomic replacement for the non-atomic spinlock MSVC inlined into seven `ObjMutex` methods (including its forced lock-steal), a crash when a random ambient variant is picked before any resource is loaded (`0x0042a820`), hotspot highlighting in 11 room and 5 minigame subclasses, exact x87 `FIST` / `#DE` semantics.
+  - Atomic replacement for the non-atomic spinlock MSVC inlined into seven `ObjMutex` methods (including its forced lock-steal), a crash when a random ambient variant is picked before any resource is loaded (`0x0042a820`), hotspot highlighting in 11 room and 5 minigame subclasses, a crash / invisible phantom buttons when pressing `Tab` after loading a game (focus stayed on the closed save screen), exact x87 `FIST` / `#DE` semantics.
   - Crashes write a report with the guest address, registers and guest call stack to `mha2_crash.log`; `--strict-mem` protects the guest NULL page for debugging.
 
 - **Tests & Regressions** ([docs/REPLAY.md](docs/REPLAY.md)):

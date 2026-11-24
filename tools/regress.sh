@@ -49,7 +49,11 @@ mkdir -p "$RUN"
 make_sandbox() {  # $1 = sandbox dir
   mkdir -p "$1/game/mha2.sav"
   for f in "$GAME_SRC"/*; do
-    [ "$(basename "$f")" = "mha2.sav" ] && continue
+    case "$(basename "$f")" in
+      # per-player state the game/runtime writes: never link it (writes would follow the
+      # symlink into the real game folder)
+      mha2.sav|mha2_quicksave.id|*.ini|*.log) continue ;;
+    esac
     ln -s "$f" "$1/game/$(basename "$f")"
   done
 }

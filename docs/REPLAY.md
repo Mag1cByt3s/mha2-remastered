@@ -83,7 +83,7 @@ Notes:
 
 Each script runs in a fresh sandbox under `work/regress/<timestamp>/<script>/`:
 `--game-dir` points at symlinks to the read-only game data plus an **empty**
-`mha2.sav/`, and the working directory is the sandbox (default settings, crash
+`mha2.sav/` (per-player files such as `mha2_quicksave.id` are never linked), and the working directory is the sandbox (default settings, crash
 log inside). Real savegames and `mha2_settings.ini` are never touched.
 
 A script passes when the game exits 0, the log contains `[replay] PASS` and no
@@ -112,3 +112,4 @@ Included scripts (`tests/replay/`):
 - `controls.rec` — rebind the dialog log in `F1 → 4. CONTROLS` (~20 s)
 - `controller.rec` — controller bindings incl. D-pad quick save/load (~110 s)
 - `overlay_text.rec` — Overlay Text Size 175% (dialog log, labels) (~60 s)
+- `tab_focus.rec` — `Tab` + `Space`/`Enter` after a quick load must not activate the closed save screen (~90 s)
