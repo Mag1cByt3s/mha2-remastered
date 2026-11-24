@@ -100,6 +100,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 - `tools/upscale_videos.py`, `tools/remaster_videos_4k.py`: Cutscene upscalers (`game_files/*.avi` → `hd_assets/videos/*.mp4` via Real-ESRGAN Video or streaming RTX `4x-ClearRealityV1` pipeline).
 - `tools/polish_cursors.py`, `tools/compress_hd_lossless.py`: SDF vector-clean cursor polisher (`cu*` & `mc*`, reading `.bak_raw` backups for idempotency) and parallel bit-exact lossless WebP recompressor.
 - `tools/install_desktop.sh`: Local NixOS launcher icon (`walkS_f000.webp`) & `.desktop` installer.
+- `tools/release_notes.sh vX.Y.Z`: prints a version's CHANGELOG section as the annotated release-tag message.
 - `tools/update.sh`: automatic updater for `git clone` installs (newest `vX.Y[.Z]` release tag, fast-forward only, save/settings backup to `backups/update-*`, incremental re-lift/rebuild, `build/update.log`). Tested by `tests/test_update.sh`.
 - `tools/regress.sh` (`make regress`): headless sandboxed replay regression runner (fresh `--game-dir` sandbox per script, local RMSE baselines in `work/regress_baseline/`, `--strict-mem`, `#! threshold` per-shot overrides, `MHA2_BIN` override).
 
@@ -141,6 +142,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
    - `Space`/`H` hotspot highlights must come from `game_collect_room_hotspots()` in `runtime/game_patches.c`, not sprite-name guesses.
    - In `16:10`/`16:9` widescreen modes, bottom dialog choices reach `y=500..536` (`uDialogBar`) — keep dialog bar detection, shader UV remapping (including `FS_POST` `F2` compare split-screen), `g_top_bar_has_buttons` corner routing, and pointer/gamepad coordinate mapping synchronized.
    - Dialog-choice detection must stay text-based (`bottom_choices_visible()` in `runtime/win32_ddraw.c`: `Font::DrawText` lines tracked per screen surface, evicted by opaque blits/fills, swapped on `Flip`). Never go back to pixel heuristics: dark rooms + inventory look like a dialog box, and choices over a lit room edge do not. `MHA2_DEBUG_HUDBAR=1` logs layout switches.
+   - The widescreen inventory band is game y=`INV_BAND_Y0`..+49 (530..579, whole items incl. tall ones). It appears in `FS_UPSCALE`, `FS_POST`, `game_to_display_y()`, the pointer/gamepad mapping, `g_bot_bar_mask` and `bottom_choices_visible()` — change all of them together.
 
 7. **GL Thread Ownership & Resource Teardown:**
    - `gl_renderer_shutdown()` and `SDL_Quit()` (including from `ExitProcess`/`TerminateProcess` in `runtime/win32_kernel.c`) must only run on the GL thread (`gl_renderer_is_gl_thread()`).
@@ -202,9 +204,10 @@ Never point replays at the real `game_files/` save folder; `tools/regress.sh` sa
 ### Publishing a Release (reaches players automatically)
 ```bash
 nix-shell --run "make test && tools/regress.sh"   # everything green
-# CHANGELOG.md: new "## [vX.Y.Z — …]" section, commit, push main
-git tag -m "vX.Y.Z" vX.Y.Z && git push origin vX.Y.Z
+# CHANGELOG.md: new "## [vX.Y.Z — …] (date)" section (heading = exact tag name), commit, push main
+git tag -a vX.Y.Z -F <(tools/release_notes.sh vX.Y.Z) && git push origin vX.Y.Z
 ```
+The annotated tag message is that version's CHANGELOG section (`tools/release_notes.sh` fails if it is missing).
 Players' `./play.sh` installs the tag on their next launch. Never move or delete a published tag; publish a new patch version instead.
 
 ### Refreshing HD Caches or Portable Release Bundles

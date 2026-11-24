@@ -4,6 +4,13 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
+## [v5.5.3 — Widescreen Inventory Shows Whole Items] (2026-11-24)
+
+### Fixes
+- **Inventory Items Cut Off at the Top in 16:10 / 16:9**: the widescreen layouts show a 50-row band of the 75-row inventory bar and used y=537..586, but items that stand taller than their slot (jar lid, bottle necks, the stick) start at y≈531 while the slot boxes end at y=579. The band is now y=530..579 (`INV_BAND_Y0` in `runtime/gl_renderer.c`) in the 16:10 dock, the 16:9 overlay, the F2 compare view, mouse/gamepad mapping and the inventory hit mask alike.
+
+---
+
 ## [v5.5.2 — Widescreen Dialog Choices & Dark Rooms] (2026-11-24)
 
 ### Fixes

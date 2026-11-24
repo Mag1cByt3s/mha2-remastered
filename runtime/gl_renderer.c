@@ -340,7 +340,12 @@ static int   g_scene_is_widescreen = 0;
 static int   g_cur_layout = LAYOUT_4_3;
 static float g_vp_win_x = 0.0f, g_vp_win_y = 0.0f, g_vp_win_w = 800.0f, g_vp_win_h = 600.0f;
 static uint8_t g_top_bar_mask[800 * 75]; /* non-black mask of y=0..74 for smart click routing */
-static uint8_t g_bot_bar_mask[800 * 50]; /* non-black mask of y=537..586 for 16:9 inventory hits */
+static uint8_t g_bot_bar_mask[800 * 50]; /* non-black mask of y=530..579 for 16:9 inventory hits */
+/* Inventory band shown by the widescreen layouts (16:10 dock / 16:9 overlay): 50 rows of the
+ * 525..600 bar. Items that stand taller than their slot start at y~531 and the slot boxes end
+ * at y=579, so 530..579 shows every item whole (537..586 cut their tops off). Keep in sync
+ * with FS_UPSCALE / FS_POST in gl_shaders.c. */
+#define INV_BAND_Y0 530
 static int     g_bot_bar_dialog_mode = 0; /* 1 when multi-line dialog choices span y=500..599 */
 static int     g_dialog_choices_visible = 0; /* from win32_ddraw.c font line tracking, per presented frame */
 static int     g_top_bar_has_buttons = 0; /* 1 when top corners contain minigame Exit/Help controls */
@@ -2457,7 +2462,7 @@ static float game_to_display_y(float gy, int layout) {
         return dlg_top + (gy - 500.0f);
     }
     if (gy < 525.0f) return gy - 75.0f; /* 800x450 widescreen room */
-    float dy = gy - 537.0f;
+    float dy = gy - (float)INV_BAND_Y0;
     if (dy < 0.0f) dy = 0.0f;
     if (dy > 49.0f) dy = 49.0f;
     return (layout == LAYOUT_16_10) ? (450.0f + dy) : (400.0f + dy);
@@ -2497,7 +2502,7 @@ static void update_hud_bar_masks(const void *pixels, int w, int h, int pitch, in
     g_top_bar_has_buttons = (top_corner_lit >= 60) ? 1 : 0;
     for (int y = 525; y < 600; y++) {
         const uint8_t *row = base + y * pitch;
-        uint8_t *dst = (y >= 537 && y < 587) ? (g_bot_bar_mask + (y - 537) * 800) : NULL;
+        uint8_t *dst = (y >= INV_BAND_Y0 && y < INV_BAND_Y0 + 50) ? (g_bot_bar_mask + (y - INV_BAND_Y0) * 800) : NULL;
         if (bpp == 32) {
             const uint32_t *p = (const uint32_t *)row;
             for (int x = 0; x < 800; x++) {
@@ -2593,8 +2598,8 @@ void gl_window_to_game_coords_f(int win_x, int win_y, float *out_gx, float *out_
         *out_gy = 500.0f + (dy - dlg_top);
     } else if (g_cur_layout == LAYOUT_16_10) {
         if (dy >= 450.0f) {
-            /* Dedicated bottom 50px inventory dock -> game y = 537..586 */
-            *out_gy = 537.0f + (dy - 450.0f);
+            /* Dedicated bottom 50px inventory dock -> game y = 530..579 */
+            *out_gy = (float)INV_BAND_Y0 + (dy - 450.0f);
         } else if (g_top_bar_has_buttons && dy < 70.0f && (dx < 120.0f || dx > 680.0f) &&
                    mask_hit_near(g_top_bar_mask, 800, 75, (int)dx, (int)dy, 8)) {
             /* Minigame top-corner Exit/Help button overlay */
@@ -2604,7 +2609,7 @@ void gl_window_to_game_coords_f(int win_x, int win_y, float *out_gx, float *out_
         }
     } else { /* LAYOUT_16_9 */
         if (dy >= 400.0f && mask_hit_near(g_bot_bar_mask, 800, 50, (int)dx, (int)(dy - 400.0f), 10)) {
-            *out_gy = 537.0f + (dy - 400.0f);
+            *out_gy = (float)INV_BAND_Y0 + (dy - 400.0f);
         } else if (g_top_bar_has_buttons && dy < 70.0f && (dx < 120.0f || dx > 680.0f) &&
                    mask_hit_near(g_top_bar_mask, 800, 75, (int)dx, (int)dy, 8)) {
             *out_gy = dy;
@@ -2620,7 +2625,7 @@ void gl_renderer_clamp_gamepad_cursor(float *nx, float *ny) {
     float min_y = 0.0f;
     if (g_gl_active && g_cur_layout != LAYOUT_4_3) {
         min_y = g_top_bar_has_buttons ? 0.0f : 75.0f;
-        max_y = g_bot_bar_dialog_mode ? 599.0f : 586.0f;
+        max_y = g_bot_bar_dialog_mode ? 599.0f : (float)(INV_BAND_Y0 + 49);
     }
     if (nx) {
         if (*nx < 0.0f) *nx = 0.0f;

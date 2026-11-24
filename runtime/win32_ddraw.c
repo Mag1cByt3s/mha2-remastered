@@ -143,7 +143,7 @@ static void evict_texts_in_rect(DDrawSurface *dst, int x0, int y0, int x1, int y
 /* ---- Dialog choice detection (16:10 / 16:9 bottom band) ----
  * Dialog choices are lines of the game's bitmap font in one column at the bottom (e.g.
  * x=286, y=522/546/570); with three or more options the first one starts above the
- * inventory band (y=537..586) that the widescreen layouts show. Every Font::DrawText line
+ * inventory band (y=530..579) that the widescreen layouts show. Every Font::DrawText line
  * starting at y >= 495 is remembered on the screen surface it was unlocked into and
  * forgotten when an opaque blit / colour fill paints over its start. Replaces the old pixel
  * heuristic (black y=500..524 + lit pixels), which mistook the inventory of dark rooms
@@ -189,7 +189,7 @@ static int bottom_choices_visible(const DDrawSurface *s) {
             int dx = s->bottom_lines[j].x - s->bottom_lines[i].x;
             if (dx < -2 || dx > 2) continue;
             n++;
-            if (s->bottom_lines[j].y < 537) above = 1;
+            if (s->bottom_lines[j].y < 530) above = 1; /* INV_BAND_Y0 in gl_renderer.c */
         }
         if (n >= 2 && above) return 1;
     }
