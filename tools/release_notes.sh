@@ -2,7 +2,7 @@
 # Print the CHANGELOG.md section of one release as an annotated-tag message:
 #   line 1: "vX.Y.Z — <title>", blank line, then the section body.
 # Usage: tools/release_notes.sh vX.Y.Z            (exit 1 if the section is missing)
-#        git tag -a vX.Y.Z -F <(tools/release_notes.sh vX.Y.Z)
+#        git tag -a --cleanup=verbatim vX.Y.Z -F <(tools/release_notes.sh vX.Y.Z)
 set -euo pipefail
 ver=${1:?usage: tools/release_notes.sh vX.Y.Z}
 changelog="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/CHANGELOG.md"

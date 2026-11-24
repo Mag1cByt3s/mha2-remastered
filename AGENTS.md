@@ -205,9 +205,9 @@ Never point replays at the real `game_files/` save folder; `tools/regress.sh` sa
 ```bash
 nix-shell --run "make test && tools/regress.sh"   # everything green
 # CHANGELOG.md: new "## [vX.Y.Z — …] (date)" section (heading = exact tag name), commit, push main
-git tag -a vX.Y.Z -F <(tools/release_notes.sh vX.Y.Z) && git push origin vX.Y.Z
+git tag -a --cleanup=verbatim vX.Y.Z -F <(tools/release_notes.sh vX.Y.Z) && git push origin vX.Y.Z
 ```
-The annotated tag message is that version's CHANGELOG section (`tools/release_notes.sh` fails if it is missing).
+The annotated tag message is that version's CHANGELOG section (`tools/release_notes.sh` fails if it is missing; `--cleanup=verbatim` keeps the `###` headings, which git would strip as comments).
 Players' `./play.sh` installs the tag on their next launch. Never move or delete a published tag; publish a new patch version instead.
 
 ### Refreshing HD Caches or Portable Release Bundles
