@@ -9,8 +9,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* 1.5 GiB flat 32-bit guest address space (demand-paged via mmap; all VAs < 0x7FFFFFFF) */
+/* 1.5 GiB flat 32-bit guest address space (demand-paged via mmap; all VAs < 0x7FFFFFFF).
+ * The full 4 GiB window (+ guard for 8-byte accesses at 0xFFFFFFFF) is reserved
+ * PROT_NONE so wild guest pointers fault (runtime/crash_handler.c) instead of
+ * touching unrelated host memory; only GUEST_MEM_SIZE is committed read/write. */
 #define GUEST_MEM_SIZE   (1536u * 1024u * 1024u)
+#define GUEST_RESERVE_SIZE    ((size_t)1 << 32 | (size_t)0x10000u)
+#define GUEST_NULL_GUARD_SIZE 0x10000u  /* protected under --strict-mem */
 #define GUEST_TEXT_START 0x00401000u
 #define GUEST_TEXT_END   0x004fd000u
 #define GUEST_TEXT_SIZE  (GUEST_TEXT_END - GUEST_TEXT_START)
@@ -27,6 +32,7 @@
 #define GUEST_HEAP_END         0x5A000000u
 #define GUEST_STACK_BASE       0x5B000000u  /* 2 MB stacks per thread up to 0x5F800000 */
 #define GUEST_STACK_SIZE       (2u * 1024u * 1024u)
+#define GUEST_HOST_THREAD_STACK ((size_t)32u * 1024u * 1024u) /* native C stack per guest thread */
 
 extern uint8_t *g_mem;
 
@@ -52,6 +58,31 @@ void win32_dispatch(CpuCtx *ctx, uint32_t import_id);
 void com_dispatch(CpuCtx *ctx, uint32_t iface_id, uint32_t slot);
 uint32_t guest_call_stdcall(CpuCtx *ctx, uint32_t fn_addr, int nargs, const uint32_t *args);
 uint32_t guest_call_cdecl(CpuCtx *ctx, uint32_t fn_addr, int nargs, const uint32_t *args);
+
+/* Blocking acquire of an original-game InterlockedIncrement-style spinlock counter
+ * (-1 = free, 0 = held). Emitted by recomp/lift.py (ATOMIC_COUNTER_GLOBALS) in place
+ * of the original forced lock-steal; implemented in runtime/guest_sync.c. */
+void guest_spin_acquire(uint32_t counter_va);
+/* Re-entrant owner-TID lock on top of a spinlock counter (original MetaSpinLock).
+ * enter() returns 1 if this call acquired it (and must pass that to leave()). */
+int guest_owner_lock_enter(uint32_t counter_va, uint32_t owner_va, uint32_t tid);
+void guest_owner_lock_leave(uint32_t counter_va, uint32_t owner_va, int held);
+
+/* Fatal signal reporter (runtime/crash_handler.c). thread_init() registers the
+ * calling thread's guest context and alternate signal stack. */
+void crash_handler_install(void);
+void crash_handler_thread_init(CpuCtx *ctx);
+void crash_handler_thread_exit(void);
+/* Guest address space & heap allocator (runtime/guest_mem.c) */
+void     runtime_mem_init(void);
+/* Protect the guest NULL page (debug: --strict-mem). Returns 0 on success. */
+int      runtime_mem_protect_null_page(void);
+uint32_t guest_alloc(uint32_t size);
+uint32_t guest_realloc(uint32_t addr, uint32_t new_size);
+void     guest_free(uint32_t addr);
+uint32_t guest_alloc_size(uint32_t addr);
+uint32_t guest_alloc_static(const void *data, uint32_t size);
+uint32_t guest_alloc_cstr(const char *s);
 
 /* Memory accessors */
 static inline void *mem_ptr(uint32_t addr) {
@@ -626,39 +657,100 @@ static inline uint32_t alu_imul2_32(CpuCtx *c, uint32_t a, uint32_t b) {
     c->cf = c->of = (r != (int64_t)(int32_t)r);
     return (uint32_t)r;
 }
+/* Flag-free ALU result helpers, emitted by recomp/lift.py when flag liveness
+ * analysis proves none of the instruction's flag outputs is ever read. Results must
+ * match the alu_* helpers exactly (verified in tests/test_cpu_semantics.c). */
+#define NF_SHIFTS(B, UT, ST)                                                           \
+    static inline UT nf_shl##B(UT a, uint32_t n) {                                     \
+        n &= 31u; return (n < B) ? (UT)((uint32_t)a << n) : (UT)0; }                    \
+    static inline UT nf_shr##B(UT a, uint32_t n) {                                     \
+        n &= 31u; return (n < B) ? (UT)((uint32_t)a >> n) : (UT)0; }                    \
+    static inline UT nf_sar##B(UT a, uint32_t n) {                                     \
+        n &= 31u; return (UT)((int32_t)(ST)a >> (n < B ? n : (uint32_t)(B - 1))); }
+#define NF_ARITH(B, UT)                                                               \
+    static inline UT nf_add##B(UT a, UT b) { return (UT)(a + b); }                    \
+    static inline UT nf_sub##B(UT a, UT b) { return (UT)(a - b); }                    \
+    static inline UT nf_inc##B(UT a) { return (UT)(a + 1u); }                         \
+    static inline UT nf_dec##B(UT a) { return (UT)(a - 1u); }                         \
+    static inline UT nf_neg##B(UT a) { return (UT)(0u - a); }
+NF_ARITH(8, uint8_t)
+NF_ARITH(16, uint16_t)
+NF_ARITH(32, uint32_t)
+#undef NF_ARITH
+static inline uint16_t nf_imul2_16(uint16_t a, uint16_t b) { return (uint16_t)((uint32_t)a * (uint32_t)b); }
+static inline uint32_t nf_imul2_32(uint32_t a, uint32_t b) { return a * b; }
+NF_SHIFTS(8, uint8_t, int8_t)
+NF_SHIFTS(16, uint16_t, int16_t)
+#undef NF_SHIFTS
+static inline uint32_t nf_shl32(uint32_t a, uint32_t n) { return a << (n & 31u); }
+static inline uint32_t nf_shr32(uint32_t a, uint32_t n) { return a >> (n & 31u); }
+static inline uint32_t nf_sar32(uint32_t a, uint32_t n) { return (uint32_t)((int32_t)a >> (n & 31u)); }
+
+/* Debug lift mode (MHA2_LIFT_FLAGCHECK=1 make lift): flags the liveness analysis
+ * declared dead are poisoned with 2 and every real flag read checks for poison,
+ * so a wrong elimination aborts at the reading instruction. */
+#define FLAG_POISON 2u
+static inline void flag_check(CpuCtx *c, uint32_t mask, uint32_t va) {
+    if (((mask & 1u) && c->cf > 1u) || ((mask & 2u) && c->zf > 1u) || ((mask & 4u) && c->sf > 1u) ||
+        ((mask & 8u) && c->of > 1u) || ((mask & 16u) && c->pf > 1u)) {
+        fprintf(stderr, "FATAL: flag liveness violation: poisoned flag read at guest 0x%08x "
+                "(mask=%u cf=%u zf=%u sf=%u of=%u pf=%u)\n", va, mask, c->cf, c->zf, c->sf, c->of, c->pf);
+        abort();
+    }
+}
+
+/* div/idiv raise #DE on x86 for a zero divisor or a quotient that does not fit the
+ * destination; the 2005 code never handles it, so report it like Windows would
+ * crash (runtime/crash_handler.c) instead of continuing with a truncated result. */
+__attribute__((noreturn, cold)) void guest_divide_error(CpuCtx *c, int bits, int is_signed,
+                                                        uint64_t dividend_hi, uint64_t dividend_lo,
+                                                        uint32_t divisor);
+
 static inline void alu_div8(CpuCtx *c, uint8_t b) {
     uint16_t num = (uint16_t)c->eax;
-    uint8_t q = (uint8_t)(num / b);
-    uint8_t r = (uint8_t)(num % b);
-    w8_lo(&c->eax, q);
-    w8_hi(&c->eax, r);
+    if (__builtin_expect(b == 0 || num / b > 0xFFu, 0)) guest_divide_error(c, 8, 0, 0, num, b);
+    w8_lo(&c->eax, (uint8_t)(num / b));
+    w8_hi(&c->eax, (uint8_t)(num % b));
 }
 static inline void alu_div16(CpuCtx *c, uint16_t b) {
     uint32_t num = ((uint32_t)(uint16_t)c->edx << 16) | (uint16_t)c->eax;
+    if (__builtin_expect(b == 0 || num / b > 0xFFFFu, 0)) guest_divide_error(c, 16, 0, 0, num, b);
     w16(&c->eax, (uint16_t)(num / b));
     w16(&c->edx, (uint16_t)(num % b));
 }
 static inline void alu_div32(CpuCtx *c, uint32_t b) {
     uint64_t num = ((uint64_t)c->edx << 32) | c->eax;
+    if (__builtin_expect(b == 0 || c->edx >= b, 0)) guest_divide_error(c, 32, 0, c->edx, c->eax, b);
     c->eax = (uint32_t)(num / b);
     c->edx = (uint32_t)(num % b);
 }
 static inline void alu_idiv8(CpuCtx *c, uint8_t b) {
     int16_t num = (int16_t)(uint16_t)c->eax;
     int8_t d = (int8_t)b;
-    w8_lo(&c->eax, (uint8_t)(num / d));
+    if (__builtin_expect(d == 0, 0)) guest_divide_error(c, 8, 1, 0, (uint16_t)num, b);
+    int16_t q = (int16_t)(num / d);
+    if (__builtin_expect(q < -128 || q > 127, 0)) guest_divide_error(c, 8, 1, 0, (uint16_t)num, b);
+    w8_lo(&c->eax, (uint8_t)q);
     w8_hi(&c->eax, (uint8_t)(num % d));
 }
 static inline void alu_idiv16(CpuCtx *c, uint16_t b) {
     int32_t num = (int32_t)(((uint32_t)(uint16_t)c->edx << 16) | (uint16_t)c->eax);
     int16_t d = (int16_t)b;
-    w16(&c->eax, (uint16_t)(num / d));
-    w16(&c->edx, (uint16_t)(num % d));
+    if (__builtin_expect(d == 0, 0)) guest_divide_error(c, 16, 1, 0, (uint32_t)num, b);
+    int64_t q = (int64_t)num / d; /* 64-bit: INT32_MIN / -1 must not trap on the host */
+    if (__builtin_expect(q < -32768 || q > 32767, 0)) guest_divide_error(c, 16, 1, 0, (uint32_t)num, b);
+    w16(&c->eax, (uint16_t)q);
+    w16(&c->edx, (uint16_t)((int64_t)num % d));
 }
 static inline void alu_idiv32(CpuCtx *c, uint32_t b) {
     int64_t num = (int64_t)(((uint64_t)c->edx << 32) | c->eax);
     int32_t d = (int32_t)b;
-    c->eax = (uint32_t)(num / d);
+    /* d == -1 with num == INT64_MIN would trap in the host division itself */
+    if (__builtin_expect(d == 0 || (d == -1 && num == INT64_MIN), 0))
+        guest_divide_error(c, 32, 1, c->edx, c->eax, b);
+    int64_t q = num / d;
+    if (__builtin_expect(q < INT32_MIN || q > INT32_MAX, 0)) guest_divide_error(c, 32, 1, c->edx, c->eax, b);
+    c->eax = (uint32_t)q;
     c->edx = (uint32_t)(num % d);
 }
 
@@ -693,16 +785,6 @@ static inline void fpu_cmp(CpuCtx *c, long double a, long double b) {
 static inline uint16_t fpu_get_sw(CpuCtx *c) {
     return (uint16_t)((c->fpu_sw & ~0x3800u) | ((c->fpu_top & 7) << 11));
 }
-static inline int64_t fpu_round_i64(CpuCtx *c, long double v) {
-    uint16_t rc = (c->fpu_cw >> 10) & 3u;
-    switch (rc) {
-        case 0: return (int64_t)llrintl(v);   /* round to nearest */
-        case 1: return (int64_t)floorl(v);    /* floor (-inf) */
-        case 2: return (int64_t)ceill(v);     /* ceil (+inf) */
-        case 3: return (int64_t)truncl(v);    /* trunc (toward 0) */
-    }
-    return (int64_t)v;
-}
 static inline long double fpu_round_ld(CpuCtx *c, long double v) {
     uint16_t rc = (c->fpu_cw >> 10) & 3u;
     switch (rc) {
@@ -712,6 +794,21 @@ static inline long double fpu_round_ld(CpuCtx *c, long double v) {
         case 3: return truncl(v);
     }
     return v;
+}
+/* x87 integer conversion semantics shared by FIST/FISTP and the __ftol patch:
+ * NaN or a rounded value outside the destination range yields the "integer
+ * indefinite" value (only the sign bit set), never a wrapped/truncated result. */
+static inline uint64_t x87_int_indefinite(int bits) {
+    return (uint64_t)1 << (bits - 1);
+}
+static inline uint64_t x87_ld_to_int(long double rounded, int bits) {
+    long double lim = (long double)((uint64_t)1 << (bits - 1)); /* 2^(bits-1) exactly */
+    if (!(rounded >= -lim && rounded < lim)) return x87_int_indefinite(bits);
+    return (uint64_t)(int64_t)rounded;
+}
+/* FIST/FISTP m16/m32/m64: round ST(0) per FPU control word RC, then convert. */
+static inline uint64_t fpu_to_int(CpuCtx *c, long double v, int bits) {
+    return x87_ld_to_int(fpu_round_ld(c, v), bits);
 }
 static inline void fpu_save(CpuCtx *c, uint32_t addr) {
     memset(g_mem + addr, 0, 108);

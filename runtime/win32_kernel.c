@@ -239,9 +239,11 @@ static void *guest_thread_main(void *arg) {
     ctx.teb_addr = to->teb_va;
     ctx.thread_id = to->tid;
     ctx.fpu_cw = 0x037Fu;
+    crash_handler_thread_init(&ctx);
 
     uint32_t a[1] = { to->param_va };
     uint32_t ret = guest_call_stdcall(&ctx, to->entry_va, 1, a);
+    crash_handler_thread_exit();
 
     pthread_mutex_lock(&to->mtx);
     to->exit_code = ret;
@@ -353,6 +355,62 @@ static int find_next_match(FindState *fs, uint32_t dst_va) {
         }
     }
     return 0;
+}
+
+/* Copy a NUL-terminated guest string into buf (bounded, printable-only). */
+static void guest_cstr_copy(uint32_t va, char *buf, size_t cap) {
+    size_t n = 0;
+    if (va >= 0x00010000u && va < GUEST_MEM_SIZE) {
+        for (; n + 1 < cap && va + n < GUEST_MEM_SIZE; n++) {
+            uint8_t ch = mem_r8(va + (uint32_t)n);
+            if (!ch) break;
+            buf[n] = (ch >= 0x20 && ch < 0x7f) ? (char)ch : '?';
+        }
+    }
+    buf[n] = 0;
+}
+
+/* Diagnose a guest RaiseException before aborting. The only raiser in mha2.exe is
+ * MSVC _CxxThrowException (0x004a8a2b), reached from the inlined STL _Xlen/_Xran
+ * helpers (std::length_error / std::out_of_range / std::logic_error) — i.e. guest
+ * programming errors. Decodes code 0xE06D7363's ThrowInfo -> CatchableTypeArray ->
+ * TypeDescriptor names and calls the object's virtual what() (vtable slot 1). */
+static void report_guest_exception(CpuCtx *c) {
+    uint32_t code = arg_u32(c, 0), flags = arg_u32(c, 1);
+    uint32_t nargs = arg_u32(c, 2), args = arg_u32(c, 3);
+    fprintf(stderr, "FATAL: guest RaiseException(code=0x%08x, flags=0x%x, nargs=%u) from 0x%08x\n",
+            code, flags, nargs, mem_r32(c->esp));
+    if (code != 0xE06D7363u || nargs < 3u || !args || args >= GUEST_MEM_SIZE - 12u) return;
+
+    uint32_t magic = mem_r32(args), obj = mem_r32(args + 4u), ti = mem_r32(args + 8u);
+    fprintf(stderr, "  MSVC C++ exception (magic 0x%08x), object=0x%08x, ThrowInfo=0x%08x\n", magic, obj, ti);
+    /* _CxxThrowException uses an EBP frame: [ebp+4] = return address in the thrower */
+    if (c->ebp >= GUEST_STACK_BASE && c->ebp < GUEST_MEM_SIZE - 8u)
+        fprintf(stderr, "  thrown from guest 0x%08x\n", mem_r32(c->ebp + 4u));
+    if (ti && ti < GUEST_MEM_SIZE - 16u) {
+        uint32_t cta = mem_r32(ti + 12u);
+        uint32_t n = (cta && cta < GUEST_MEM_SIZE - 4u) ? mem_r32(cta) : 0u;
+        for (uint32_t k = 0; k < n && k < 8u; k++) {
+            uint32_t ct = mem_r32(cta + 4u + k * 4u);
+            uint32_t td = (ct && ct < GUEST_MEM_SIZE - 8u) ? mem_r32(ct + 4u) : 0u;
+            char name[128];
+            guest_cstr_copy(td ? td + 8u : 0u, name, sizeof(name));
+            fprintf(stderr, "  %s %s\n", k == 0 ? "type:     " : "catchable:", name[0] ? name : "?");
+        }
+    }
+    if (obj >= 0x00010000u && obj < GUEST_MEM_SIZE - 4u) {
+        uint32_t vtbl = mem_r32(obj);
+        uint32_t what_fn = (vtbl >= 0x00400000u && vtbl < GUEST_MEM_SIZE - 8u) ? mem_r32(vtbl + 4u) : 0u;
+        if (what_fn >= GUEST_TEXT_START && what_fn < GUEST_TEXT_END && g_code_table[what_fn - GUEST_TEXT_START]) {
+            uint32_t s_ecx = c->ecx;
+            c->ecx = obj; /* __thiscall const char *exception::what() const */
+            uint32_t msg_va = guest_call_stdcall(c, what_fn, 0, NULL);
+            c->ecx = s_ecx;
+            char msg[256];
+            guest_cstr_copy(msg_va, msg, sizeof(msg));
+            fprintf(stderr, "  what():   \"%s\"\n", msg);
+        }
+    }
 }
 
 int win32_kernel_dispatch(CpuCtx *c, uint32_t import_id) {
@@ -514,7 +572,9 @@ int win32_kernel_dispatch(CpuCtx *c, uint32_t import_id) {
         case IMP_KERNEL32_DLL_UnhandledExceptionFilter:
             stdcall_ret(c, 1, 1); return 1;
         case IMP_KERNEL32_DLL_RaiseException:
-            fprintf(stderr, "FATAL: guest RaiseException(code=0x%08x)\n", arg_u32(c, 0));
+            /* No guest SEH unwinding: report precisely, then abort() so the crash
+             * reporter prints the guest call stack (runtime/crash_handler.c). */
+            report_guest_exception(c);
             abort();
         case IMP_KERNEL32_DLL_RtlUnwind:
             stdcall_ret(c, 4, 0); return 1;
@@ -617,7 +677,14 @@ int win32_kernel_dispatch(CpuCtx *c, uint32_t import_id) {
             g_handles[h].thr = to;
             pthread_mutex_unlock(&g_hdl_mtx);
             if (tid_ptr) mem_w32(tid_ptr, to->tid);
-            if (pthread_create(&to->pt, NULL, guest_thread_main, to) != 0) {
+            /* Explicit host stack: lifted guest calls nest as native C calls, so don't
+             * depend on RLIMIT_STACK-derived defaults (2 MiB with `ulimit -s unlimited`). */
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+            pthread_attr_setstacksize(&attr, GUEST_HOST_THREAD_STACK);
+            int pc_rc = pthread_create(&to->pt, &attr, guest_thread_main, to);
+            pthread_attr_destroy(&attr);
+            if (pc_rc != 0) {
                 pthread_mutex_lock(&g_hdl_mtx);
                 g_handles[h].thr = NULL;
                 g_handles[h].type = HT_NONE;

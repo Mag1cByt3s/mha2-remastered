@@ -590,11 +590,30 @@ static void upload_cursor_sprite(DDrawSurface *src, int sx0, int sy0, int sw, in
     gl_renderer_set_cursor(rgba, sw, sh, sw, sh, hot_x, hot_y, hash);
 }
 
+static DDrawSurface *g_last_presented;
+
+/* FNV-1a 64 of the last presented guest frame (replay `hash` regression probes). */
+uint64_t ddraw_last_frame_hash(uint32_t *out_w, uint32_t *out_h) {
+    DDrawSurface *s = g_last_presented;
+    if (out_w) *out_w = s ? s->width : 0;
+    if (out_h) *out_h = s ? s->height : 0;
+    if (!s || !s->in_use || !s->pixels_va) return 0;
+    uint32_t row = s->width * (s->bpp / 8u);
+    if (row > s->pitch || (uint64_t)s->pitch * s->height > GUEST_MEM_SIZE - s->pixels_va) return 0;
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (uint32_t y = 0; y < s->height; y++) {
+        const uint8_t *p = g_mem + s->pixels_va + (size_t)y * s->pitch;
+        for (uint32_t x = 0; x < row; x++) { h ^= p[x]; h *= 0x100000001b3ull; }
+    }
+    return h;
+}
+
 void ddraw_present_surface(DDrawSurface *surf) {
     if (!surf || !surf->pixels_va) return;
     /* Do not overwrite an active AVI/DirectShow fullscreen cutscene with the empty
        DirectDraw backbuffer (fixes 25Hz black-frame strobe flicker during intro/cutscenes). */
     if (win32_avi_is_playing()) return;
+    g_last_presented = surf;
     if (g_cursor_drawn_this_frame) {
         g_cursor_erase_streak = 0;
     } else if (g_cursor_erased_this_frame) {

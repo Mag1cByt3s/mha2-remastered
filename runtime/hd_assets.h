@@ -37,6 +37,8 @@ int hd_assets_decode_wide_rgba(int asset_id, HdImageRGBA *out);
 /* ---- Native HD Foreground Sprites, Characters, Inventory & Cursors (hd_assets/sprites/) ---- */
 int hd_sprites_count(void);
 void hd_sprites_set_room_prefix(const char *bg_rel_name);
+/* Active room prefix derived from the last HD background (e.g. "l/006/"), "" if none. */
+const char *hd_sprites_room_prefix(void);
 uint32_t hd_sprites_get_room_gen(void);
 
 /* Match a color-keyed sprite frame rect inside a guest DirectDraw surface against indexed HD sprites.

@@ -10,6 +10,7 @@ pkgs.mkShell {
     ffmpeg
     libGL
     dejavu_fonts
+    imagemagick  # tools/regress.sh screenshot comparison
     (python3.withPackages (ps: [ ps.capstone ]))
   ];
 

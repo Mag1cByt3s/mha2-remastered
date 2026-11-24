@@ -9,42 +9,49 @@
 #include <math.h>
 #include <unistd.h>
 
-/* 0x004443f0: void __fastcall MetaSpinLock::Lock(uint8_t *out_acquired)
- * Original bug: non-atomic DAT_0051b3b8++ with 200x Sleep(1) and forced
- * lock-steal (DAT_0051b3b8 = 0) while another thread is still in the CS.
- * Fix: true atomic CAS on DAT_0051b3b8 (-1 -> 0) with zero forced lock-steal. */
-static void patch_004443f0_metalock(CpuCtx *c) {
-    uint32_t tid = c->thread_id ? c->thread_id : 1000u;
-    uint32_t out_acq = c->ecx;
-    uint32_t *owner_ptr = (uint32_t *)(g_mem + 0x00527824u);
-    int32_t  *lock_ptr  = (int32_t  *)(g_mem + 0x0051b3b8u);
+/* ---- Original MetaSpinLock (counter 0x0051b3b8, owner TID 0x00527824) ----
+ * The 2005 binary implements a global InterlockedIncrement-style spinlock
+ * (-1 = free, 0 = held) with NON-atomic `mov/inc/mov` sequences, inlined into
+ * every ObjMutex method, and forcibly steals it (counter = 0) after 200 failed
+ * Sleep(1) retries while another thread may still be inside the critical section.
+ * recomp/lift.py (ATOMIC_COUNTER_GLOBALS) lifts every inlined inc/dec as an atomic
+ * RMW and every forced steal as guest_spin_acquire(); the out-of-line Lock and
+ * TryLock below use the exact same protocol (runtime/guest_sync.c). */
+#define META_LOCK_VA  0x0051b3b8u
+#define META_OWNER_VA 0x00527824u
 
-    if (__atomic_load_n(owner_ptr, __ATOMIC_ACQUIRE) == tid) {
-        if (out_acq) mem_w8(out_acq, 0);
-        c->esp += 4u;
-        return;
-    }
-    if (out_acq) mem_w8(out_acq, 1);
-    for (;;) {
-        int32_t expected = -1;
-        if (__atomic_compare_exchange_n(lock_ptr, &expected, 0, 0,
-                                        __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
-            __atomic_store_n(owner_ptr, tid, __ATOMIC_RELEASE);
-            break;
-        }
-        usleep(200);
-    }
+static inline uint32_t guest_tid(const CpuCtx *c) {
+    return c->thread_id ? c->thread_id : 1000u;
+}
+
+static inline int meta_lock_enter(uint32_t tid) {
+    return guest_owner_lock_enter(META_LOCK_VA, META_OWNER_VA, tid);
+}
+
+static inline void meta_lock_leave(int held) {
+    guest_owner_lock_leave(META_LOCK_VA, META_OWNER_VA, held);
+}
+
+/* 0x004443f0: void __fastcall MetaSpinLock::Lock(uint8_t *out_acquired)
+ * Fix: same protocol as the lifted inline copies, minus the forced lock-steal. */
+static void patch_004443f0_metalock(CpuCtx *c) {
+    uint32_t out_acq = c->ecx;
+    int held = meta_lock_enter(guest_tid(c));
+    if (out_acq) mem_w8(out_acq, (uint8_t)held);
     c->esp += 4u;
 }
 
 /* 0x00444230: int __thiscall ObjMutex::TryLock(void *this, uint32_t timeout_ms, uint32_t *out_status)
- * Original bug: uses the non-atomic meta-spinlock with forced lock-steal and 10ms Sleep polling.
- * Fix: atomic CAS directly on *(uint32_t *)(this + 4) with 1ms polling and zero lock-steal. */
+ * Original bug: guards the owner slot (this+4) with the non-atomic, lock-stealing meta-lock
+ * and polls with Sleep(10). Fix: identical check-and-set under the atomic meta-lock (so it
+ * stays consistent with every other ObjMutex method), 1ms polling, zero lock-steal.
+ * Status codes match the original: 2 = already owned, 3 = acquired immediately,
+ * 0 = acquired after waiting, 4 = timed out. */
 static void patch_00444230_trylock(CpuCtx *c) {
     uint32_t this_va    = c->ecx;
     uint32_t timeout_ms = arg_u32(c, 0);
     uint32_t status_va  = arg_u32(c, 1);
-    uint32_t tid        = c->thread_id ? c->thread_id : 1000u;
+    uint32_t tid        = guest_tid(c);
 
     if (status_va) mem_w32(status_va, 2u);
     if (!this_va || this_va >= GUEST_MEM_SIZE - 8u) {
@@ -59,24 +66,29 @@ static void patch_00444230_trylock(CpuCtx *c) {
     }
 
     if (status_va) mem_w32(status_va, 3u);
-    uint32_t expected = 0u;
-    if (__atomic_compare_exchange_n(slot, &expected, tid, 0,
-                                    __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+    int held = meta_lock_enter(tid);
+    if (__atomic_load_n(slot, __ATOMIC_ACQUIRE) == 0u) {
+        __atomic_store_n(slot, tid, __ATOMIC_RELEASE);
+        meta_lock_leave(held);
         stdcall_ret(c, 2, this_va);
         return;
     }
+    meta_lock_leave(held);
 
     uint32_t start = SDL_GetTicks();
-    do {
+    for (;;) {
         usleep(1000);
-        expected = 0u;
-        if (__atomic_compare_exchange_n(slot, &expected, tid, 0,
-                                        __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+        held = meta_lock_enter(tid);
+        if (__atomic_load_n(slot, __ATOMIC_ACQUIRE) == 0u) {
+            __atomic_store_n(slot, tid, __ATOMIC_RELEASE);
+            meta_lock_leave(held);
             if (status_va) mem_w32(status_va, 0u);
             stdcall_ret(c, 2, this_va);
             return;
         }
-    } while ((uint32_t)(SDL_GetTicks() - start) < timeout_ms);
+        meta_lock_leave(held);
+        if ((uint32_t)(SDL_GetTicks() - start) >= timeout_ms) break;
+    }
 
     if (status_va) mem_w32(status_va, 4u);
     stdcall_ret(c, 2, 0u);
@@ -97,9 +109,10 @@ static void patch_004a7a5e_ceil(CpuCtx *c) {
 static void patch_004a71cc_ftol(CpuCtx *c) {
     long double v = fpu_st(c, 0);
     fpu_pop(c);
-    int64_t iv = (int64_t)truncl(v);
-    c->eax = (uint32_t)(uint64_t)iv;
-    c->edx = (uint32_t)((uint64_t)iv >> 32);
+    /* Original: FLDCW(RC=truncate) + FISTP qword -> NaN/out-of-range gives 0x8000000000000000 */
+    uint64_t iv = x87_ld_to_int(truncl(v), 64);
+    c->eax = (uint32_t)iv;
+    c->edx = (uint32_t)(iv >> 32);
     c->esp += 4u;
 }
 
@@ -604,6 +617,18 @@ static void hs_walk_container(HsWalkCtx *ctx, uint32_t container,
     }
 }
 
+/* MSVC vtable inheritance probe (mha2.exe has no RTTI): a subclass vtable keeps the
+ * base class's own method pointers in the slots it does not override. Slots 1, 24
+ * and 26 are Location/Minigame base methods that no subclass overrides. */
+static int hs_vtable_derives(uint32_t vt, uint32_t base_vt) {
+    static const uint32_t sig_slots[] = { 1u, 24u, 26u };
+    if (vt == base_vt) return 1;
+    if (vt < 0x004fd000u || vt >= 0x0051a000u - 27u * 4u) return 0; /* vtables live in .rdata */
+    for (size_t i = 0; i < sizeof(sig_slots) / sizeof(sig_slots[0]); i++)
+        if (mem_r32(vt + sig_slots[i] * 4u) != mem_r32(base_vt + sig_slots[i] * 4u)) return 0;
+    return 1;
+}
+
 int game_collect_room_hotspots(GameHotspot *out, int max_out) {
     if (!out || max_out <= 0 || !g_mem || win32_avi_is_playing()) return 0;
 
@@ -613,13 +638,17 @@ int game_collect_room_hotspots(GameHotspot *out, int max_out) {
     uint32_t scene = mem_r32(mg + 0xc0u);
     if (!hs_va_ok(scene, 0xd0u)) return 0;
     uint32_t scene_vt = mem_r32(scene);
-    int is_location = (scene == mem_r32(mg + 0xc4u) && scene_vt == 0x00505054u);
-    int is_minigame = (scene == mem_r32(mg + 0xc8u) && scene_vt == 0x005052acu);
+    /* Rooms/minigames with custom logic are subclasses with their own vtables
+     * (11 Location + 5 Minigame subclasses), so test inheritance, not identity. */
+    int is_location = (scene == mem_r32(mg + 0xc4u) && hs_vtable_derives(scene_vt, 0x00505054u));
+    int is_minigame = (scene == mem_r32(mg + 0xc8u) && hs_vtable_derives(scene_vt, 0x005052acu));
     if (!is_location && !is_minigame) return 0;
 
     if (mem_r32(scene + 0xa4u) != 0u || (mem_r32(scene + 0xa0u) & 0x000ff000u) != 0u) return 0;
-    uint32_t dlg = mem_r32(scene + 0x6cu);
-    if (hs_va_ok(dlg, 0x84u) && mem_r32(dlg + 0x80u) != 0u) return 0;
+    /* No scene-graph "dialog open" test here: the former (scene+0x6c)->+0x80 check is a
+     * mode field set by the generic setter 0x0042f6c0 that reads 2 in ordinary idle rooms
+     * (l/009, l/016, l/017), which blanked the highlighter in every regular location.
+     * The renderer suppresses markers while dialog choices are shown (g_bot_bar_dialog_mode). */
 
     uint32_t rd = mem_r32(scene + 0x1cu);
     if (!hs_va_ok(rd, 0x130u) || mem_r32(rd) != 0x00507b30u) return 0;

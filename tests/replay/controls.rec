@@ -1,0 +1,39 @@
+# Rebindable controls (F1 -> 4. CONTROLS): rebind the Dialog & Clue Log from Ctrl+L to
+# Ctrl+K, then verify Ctrl+K opens the log and Ctrl+L no longer does.
+wait video 60
+1000 tap Escape
+wait menu 60
+1500 tap F1
++800 tap Tab
++300 tap Tab
++300 tap Tab
++800 shotfull 01_controls_tab
++150 tap Down
++150 tap Down
++150 tap Down
++150 tap Down
++150 tap Down
++150 tap Down
++150 tap Down
++150 tap Down
++150 tap Down
++150 tap Down
++150 tap Down
++150 tap Down
++300 tap Return
++500 shotfull 02_capture_prompt
++300 key down Left Ctrl
++100 tap K
++100 key up Left Ctrl
++600 shotfull 03_rebound
++300 tap Escape
++800 key down Left Ctrl
++100 tap K
++100 key up Left Ctrl
++800 shotfull 04_log_via_ctrl_k
++300 tap Escape
++500 key down Left Ctrl
++100 tap L
++100 key up Left Ctrl
++800 shotfull 05_ctrl_l_unbound
++300 quit

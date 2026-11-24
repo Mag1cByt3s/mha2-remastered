@@ -1,4 +1,6 @@
 #include "runtime.h"
+#include "input_replay.h"
+#include "input_bindings.h"
 #include "gl_renderer.h"
 #include "imports.h"
 #include <ctype.h>
@@ -156,8 +158,8 @@ static void gamepad_update_cursor(void) {
     }
 }
 
-static uint32_t g_fast_walk_mask = 0; /* bit0: LShift, bit1: RShift, bit2: Pad Y, bit3: Pad LB */
-static uint32_t g_hotspot_mask   = 0; /* bit0: Space, bit1: H, bit2: Pad X */
+static uint32_t g_fast_walk_mask = 0; /* bits 0-1: key binding slots, bits 2-3: controller slots */
+static uint32_t g_hotspot_mask   = 0; /* bits 0-1: key binding slots, bits 2-3: controller slots */
 
 static void clear_held_qol_keys(void) {
     if (g_fast_walk_mask) {
@@ -170,11 +172,134 @@ static void clear_held_qol_keys(void) {
     }
 }
 
+/* ---- Guest mouse input (shared by the SDL path and the replay engine) ---- */
+static void set_mouse_pos(float fx, float fy) {
+    g_mouse_fx = fx;
+    g_mouse_fy = fy;
+    g_mouse_x = (int)(fx + 0.5f);
+    g_mouse_y = (int)(fy + 0.5f);
+    gl_renderer_set_live_mouse(fx, fy, g_os_cursor_hidden);
+}
+
+void win32_input_mouse_pos(float *fx, float *fy) {
+    *fx = g_mouse_fx;
+    *fy = g_mouse_fy;
+}
+
+void win32_input_mouse_move(float fx, float fy) {
+    int dx = (int)(fx + 0.5f) - g_mouse_x;
+    int dy = (int)(fy + 0.5f) - g_mouse_y;
+    set_mouse_pos(fx, fy);
+    dinput_push_mouse_move(dx, dy, g_mouse_x, g_mouse_y);
+    uint32_t lp = ((uint32_t)(uint16_t)g_mouse_y << 16) | (uint16_t)g_mouse_x;
+    push_msg(g_main_hwnd, 0x0200u /* WM_MOUSEMOVE */, 0, lp);
+    input_replay_record_mouse(fx, fy, -1, 0);
+}
+
+/* button: 0 = left, 1 = right, 2 = middle; fx < 0 keeps the current position */
+void win32_input_mouse_button(float fx, float fy, int button, int down) {
+    if (fx >= 0.0f) set_mouse_pos(fx, fy);
+    uint32_t lp = ((uint32_t)(uint16_t)g_mouse_y << 16) | (uint16_t)g_mouse_x;
+    if (button == 0) {
+        dinput_push_mouse_button(0, down);
+        push_msg(g_main_hwnd, down ? 0x0201u : 0x0202u, down ? 1u : 0u, lp);
+    } else if (button == 1) {
+        dinput_push_mouse_button(1, down);
+        push_msg(g_main_hwnd, down ? 0x0204u : 0x0205u, down ? 2u : 0u, lp);
+    } else if (button == 2) {
+        dinput_push_mouse_button(2, down);
+        push_msg(g_main_hwnd, down ? 0x0207u : 0x0208u, down ? 16u : 0u, lp);
+    } else {
+        return;
+    }
+    input_replay_record_mouse(g_mouse_fx, g_mouse_fy, button, down);
+}
+
+/* UTF-8 text -> WM_CHAR (Latin-1 range, as the 2005 game expects) */
+void win32_input_text(const char *utf8) {
+    const uint8_t *p = (const uint8_t *)utf8;
+    while (p && *p) {
+        uint32_t cp = 0;
+        if (*p < 0x80) { cp = *p++; }
+        else if ((*p & 0xE0) == 0xC0 && p[1]) {
+            cp = ((*p & 0x1Fu) << 6) | (p[1] & 0x3Fu);
+            p += 2;
+        } else { p++; continue; }
+        if (cp >= 0x20 && cp <= 0xFF) {
+            push_msg(g_main_hwnd, 0x0102u /* WM_CHAR */, cp, 1);
+        }
+    }
+}
+
+/* ---- Rebindable remaster actions (runtime/input_bindings.c) ---- */
+/* Hold-action masks: bits 0..1 = keyboard binding slots, bits 2..3 = controller slots */
+static void set_hold_action(int a, uint32_t bit, int down) {
+    uint32_t *mask = (a == ACT_HOTSPOTS) ? &g_hotspot_mask : &g_fast_walk_mask;
+    if (down) *mask |= bit; else *mask &= ~bit;
+    if (a == ACT_HOTSPOTS) gl_renderer_set_hotspot_highlight(*mask != 0);
+    else gl_renderer_set_fast_walk(*mask != 0);
+}
+
+static void perform_action(int a) {
+    switch (a) {
+    case ACT_SETTINGS_MENU: clear_held_qol_keys(); gl_menu_toggle(); break;
+    case ACT_COMPARE_SPLIT: gl_renderer_toggle_compare_split(); break;
+    case ACT_PERF_HUD: gl_renderer_toggle_hud(); break;
+    case ACT_VSYNC_CYCLE: gl_renderer_cycle_vsync(); break;
+    case ACT_HD_TEXT: gl_renderer_toggle_hd_text(); break;
+    case ACT_HD_ASSETS: gl_renderer_toggle_hd_assets(); break;
+    case ACT_VOLUME_DOWN:
+    case ACT_VOLUME_UP: {
+        float vol = g_cfg.master_volume + ((a == ACT_VOLUME_UP) ? 0.1f : -0.1f);
+        if (vol < 0.0f) vol = 0.0f;
+        if (vol > 1.5f) vol = 1.5f;
+        __atomic_store(&g_cfg.master_volume, &vol, __ATOMIC_RELAXED);
+        __atomic_store_n(&g_cfg.muted, 0, __ATOMIC_RELAXED);
+        gl_config_save(NULL);
+        gl_renderer_show_toast("Volume: %d%%", (int)(vol * 100.0f + 0.5f));
+        break;
+    }
+    case ACT_MUTE: {
+        int muted = !g_cfg.muted;
+        __atomic_store_n(&g_cfg.muted, muted, __ATOMIC_RELAXED);
+        gl_config_save(NULL);
+        gl_renderer_show_toast("Audio: %s", muted ? "Muted" : "Unmuted");
+        break;
+    }
+    case ACT_DECOUPLED_CURSOR: gl_renderer_toggle_decoupled_cursor(); break;
+    case ACT_FULLSCREEN: gl_renderer_toggle_fullscreen(); break;
+    case ACT_ASPECT_CYCLE: gl_renderer_cycle_aspect(); break;
+    case ACT_DIALOG_LOG: clear_held_qol_keys(); gl_renderer_toggle_dialog_log(); break;
+    case ACT_SCREENSHOT: gl_renderer_request_screenshot(); break;
+    case ACT_QUICK_SAVE: clear_held_qol_keys(); input_replay_quick_save(); break;
+    case ACT_QUICK_LOAD: clear_held_qol_keys(); input_replay_quick_load(); break;
+    default: break;
+    }
+}
+
+static int is_user_input_event(Uint32 type) {
+    switch (type) {
+    case SDL_KEYDOWN: case SDL_KEYUP: case SDL_TEXTINPUT:
+    case SDL_MOUSEMOTION: case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP: case SDL_MOUSEWHEEL:
+    case SDL_CONTROLLERBUTTONDOWN: case SDL_CONTROLLERBUTTONUP: case SDL_CONTROLLERAXISMOTION:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 void win32_pump_sdl_events(void) {
     static int g_pad_init = 0;
     if (!g_pad_init) { g_pad_init = 1; gamepad_ensure_open(); }
+    input_replay_poll();
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
+        if (is_user_input_event(ev.type)) {
+            /* While a --replay script or quick save/load macro runs, only injected events
+             * drive the game; real key releases still pass so nothing stays held down. */
+            if (input_replay_active() && !input_replay_is_injected(&ev) && ev.type != SDL_KEYUP) continue;
+            input_replay_record_event(&ev);
+        }
         if (ev.type == SDL_CONTROLLERDEVICEADDED) {
             gamepad_ensure_open();
             continue;
@@ -194,9 +319,8 @@ void win32_pump_sdl_events(void) {
         if (ev.type == SDL_CONTROLLERBUTTONDOWN || ev.type == SDL_CONTROLLERBUTTONUP) {
             int down = (ev.type == SDL_CONTROLLERBUTTONDOWN);
             Uint8 btn = ev.cbutton.button;
-            if (down && btn == SDL_CONTROLLER_BUTTON_BACK) {
-                clear_held_qol_keys();
-                gl_menu_toggle();
+            if (down && bindings_match_pad(btn, NULL) == ACT_SETTINGS_MENU) {
+                perform_action(ACT_SETTINGS_MENU);
                 continue;
             }
             if (gl_menu_is_open()) {
@@ -212,6 +336,7 @@ void win32_pump_sdl_events(void) {
                     else if (btn == SDL_CONTROLLER_BUTTON_B || btn == SDL_CONTROLLER_BUTTON_START) synth.key.keysym.sym = SDLK_ESCAPE;
                     else if (btn == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) synth.key.keysym.sym = SDLK_q;
                     else if (btn == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) synth.key.keysym.sym = SDLK_e;
+                    synth.key.windowID = GL_MENU_PAD_SYNTH; /* not capturable as a keyboard binding */
                     if (synth.key.keysym.sym) gl_menu_handle_event(&synth);
                 }
                 continue;
@@ -223,20 +348,14 @@ void win32_pump_sdl_events(void) {
             } else if (btn == SDL_CONTROLLER_BUTTON_B) {
                 dinput_push_mouse_button(1, down);
                 push_msg(g_main_hwnd, down ? 0x0204u : 0x0205u, down ? 2u : 0u, lp);
-            } else if (btn == SDL_CONTROLLER_BUTTON_X) {
-                if (down) g_hotspot_mask |= 4u; else g_hotspot_mask &= ~4u;
-                gl_renderer_set_hotspot_highlight(g_hotspot_mask != 0);
-            } else if (btn == SDL_CONTROLLER_BUTTON_Y) {
-                if (down) g_fast_walk_mask |= 4u; else g_fast_walk_mask &= ~4u;
-                gl_renderer_set_fast_walk(g_fast_walk_mask != 0);
-            } else if (btn == SDL_CONTROLLER_BUTTON_LEFTSHOULDER) {
-                if (down) g_fast_walk_mask |= 8u; else g_fast_walk_mask &= ~8u;
-                gl_renderer_set_fast_walk(g_fast_walk_mask != 0);
-            } else if (down && btn == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) {
-                gl_renderer_toggle_compare_split();
             } else if (btn == SDL_CONTROLLER_BUTTON_START) {
                 push_msg(g_main_hwnd, down ? 0x0100u : 0x0101u, 0x1Bu, down ? 1u : 0xC0000001u);
                 if (down) push_msg(g_main_hwnd, 0x0102u, 0x1Bu, 1u);
+            } else {
+                int slot = 0;
+                int a = bindings_match_pad(btn, &slot);
+                if (a >= 0 && bindings_is_hold(a)) set_hold_action(a, 4u << slot, down);
+                else if (a >= 0 && down) perform_action(a);
             }
             continue;
         }
@@ -248,19 +367,23 @@ void win32_pump_sdl_events(void) {
         }
         if (ev.type == SDL_KEYDOWN) {
             SDL_Keycode sym = ev.key.keysym.sym;
+            if (gl_menu_is_capturing_key()) { /* F1 -> 4. CONTROLS: next key becomes a binding */
+                gl_menu_handle_event(&ev);
+                continue;
+            }
             if (sym == SDLK_F4 && (ev.key.keysym.mod & KMOD_ALT)) {
                 g_quit_requested = 1;
                 push_msg(g_main_hwnd, 0x0010u /* WM_CLOSE */, 0, 0);
                 push_msg(g_main_hwnd, 0x0012u /* WM_QUIT */, 0, 0);
                 continue;
             }
-            if (sym == SDLK_F1) {
-                clear_held_qol_keys();
-                gl_menu_toggle();
+            if (sym == SDLK_RETURN && (ev.key.keysym.mod & KMOD_ALT)) {
+                gl_renderer_toggle_fullscreen();
                 continue;
             }
-            if (sym == SDLK_F11 || (sym == SDLK_RETURN && (ev.key.keysym.mod & KMOD_ALT))) {
-                gl_renderer_toggle_fullscreen();
+            int a = bindings_match_key(sym, ev.key.keysym.mod, NULL);
+            if (a == ACT_SETTINGS_MENU || a == ACT_FULLSCREEN) { /* also while the menu is open */
+                perform_action(a);
                 continue;
             }
         }
@@ -277,7 +400,7 @@ void win32_pump_sdl_events(void) {
         }
         if (gl_renderer_is_dialog_log_open()) {
             if (ev.type == SDL_KEYDOWN &&
-                ((ev.key.keysym.sym == SDLK_l && (ev.key.keysym.mod & KMOD_CTRL)) ||
+                (bindings_match_key(ev.key.keysym.sym, ev.key.keysym.mod, NULL) == ACT_DIALOG_LOG ||
                  ev.key.keysym.sym == SDLK_ESCAPE)) {
                 gl_renderer_toggle_dialog_log();
                 continue;
@@ -294,51 +417,12 @@ void win32_pump_sdl_events(void) {
         switch (ev.type) {
             case SDL_KEYDOWN: {
                 SDL_Keycode sym = ev.key.keysym.sym;
-                if (sym == SDLK_l && (ev.key.keysym.mod & KMOD_CTRL)) {
-                    clear_held_qol_keys();
-                    gl_renderer_toggle_dialog_log();
-                    break;
-                }
-                if (sym == SDLK_F2) { gl_renderer_toggle_compare_split(); break; }
-                if (sym == SDLK_PRINTSCREEN || (sym == SDLK_p && (ev.key.keysym.mod & KMOD_CTRL))) {
-                    gl_renderer_request_screenshot();
-                    break;
-                }
-                if (sym == SDLK_LSHIFT) {
-                    g_fast_walk_mask |= 1u;
-                    gl_renderer_set_fast_walk(g_fast_walk_mask != 0);
-                } else if (sym == SDLK_RSHIFT) {
-                    g_fast_walk_mask |= 2u;
-                    gl_renderer_set_fast_walk(g_fast_walk_mask != 0);
-                }
-                if (sym == SDLK_SPACE) {
-                    g_hotspot_mask |= 1u;
-                    gl_renderer_set_hotspot_highlight(g_hotspot_mask != 0);
-                } else if (sym == SDLK_h) {
-                    g_hotspot_mask |= 2u;
-                    gl_renderer_set_hotspot_highlight(g_hotspot_mask != 0);
-                }
-                if (sym == SDLK_F3) { gl_renderer_toggle_hud(); break; }
-                if (sym == SDLK_F4) { gl_renderer_cycle_vsync(); break; }
-                if (sym == SDLK_F5) { gl_renderer_toggle_hd_text(); break; }
-                if (sym == SDLK_F6) { gl_renderer_toggle_hd_assets(); break; }
-                if (sym == SDLK_F10) { gl_renderer_toggle_decoupled_cursor(); break; }
-                if (sym == SDLK_F12) { gl_renderer_cycle_aspect(); break; }
-                if (sym == SDLK_F7 || sym == SDLK_F8) {
-                    float vol = g_cfg.master_volume + ((sym == SDLK_F8) ? 0.1f : -0.1f);
-                    if (vol < 0.0f) vol = 0.0f;
-                    if (vol > 1.5f) vol = 1.5f;
-                    __atomic_store(&g_cfg.master_volume, &vol, __ATOMIC_RELAXED);
-                    __atomic_store_n(&g_cfg.muted, 0, __ATOMIC_RELAXED);
-                    gl_config_save(NULL);
-                    gl_renderer_show_toast("Volume: %d%%", (int)(vol * 100.0f + 0.5f));
-                    break;
-                }
-                if (sym == SDLK_F9) {
-                    int muted = !g_cfg.muted;
-                    __atomic_store_n(&g_cfg.muted, muted, __ATOMIC_RELAXED);
-                    gl_config_save(NULL);
-                    gl_renderer_show_toast("Audio: %s", muted ? "Muted" : "Unmuted");
+                int slot = 0;
+                int act = bindings_match_key(sym, ev.key.keysym.mod, &slot);
+                if (act >= 0 && bindings_is_hold(act)) {
+                    set_hold_action(act, 1u << slot, 1); /* hold keys still reach the game */
+                } else if (act >= 0) {
+                    if (!ev.key.repeat || act == ACT_VOLUME_DOWN || act == ACT_VOLUME_UP) perform_action(act);
                     break;
                 }
                 uint32_t vk = sdl_key_to_vk(sym);
@@ -352,79 +436,30 @@ void win32_pump_sdl_events(void) {
             }
             case SDL_KEYUP: {
                 SDL_Keycode sym = ev.key.keysym.sym;
-                if (sym == SDLK_LSHIFT) {
-                    g_fast_walk_mask &= ~1u;
-                    gl_renderer_set_fast_walk(g_fast_walk_mask != 0);
-                } else if (sym == SDLK_RSHIFT) {
-                    g_fast_walk_mask &= ~2u;
-                    gl_renderer_set_fast_walk(g_fast_walk_mask != 0);
-                }
-                if (sym == SDLK_SPACE) {
-                    g_hotspot_mask &= ~1u;
-                    gl_renderer_set_hotspot_highlight(g_hotspot_mask != 0);
-                } else if (sym == SDLK_h) {
-                    g_hotspot_mask &= ~2u;
-                    gl_renderer_set_hotspot_highlight(g_hotspot_mask != 0);
-                }
+                int slot = 0;
+                int act = bindings_match_key_release(sym, &slot);
+                if (act >= 0) set_hold_action(act, 1u << slot, 0);
                 uint32_t vk = sdl_key_to_vk(sym);
                 if (vk) push_msg(g_main_hwnd, 0x0101u /* WM_KEYUP */, vk, 0xC0000001u);
                 break;
             }
-            case SDL_TEXTINPUT: {
-                const uint8_t *p = (const uint8_t *)ev.text.text;
-                while (*p) {
-                    uint32_t cp = 0;
-                    if (*p < 0x80) { cp = *p++; }
-                    else if ((*p & 0xE0) == 0xC0 && p[1]) {
-                        cp = ((*p & 0x1Fu) << 6) | (p[1] & 0x3Fu);
-                        p += 2;
-                    } else { p++; continue; }
-                    if (cp >= 0x20 && cp <= 0xFF) {
-                        push_msg(g_main_hwnd, 0x0102u /* WM_CHAR */, cp, 1);
-                    }
-                }
+            case SDL_TEXTINPUT:
+                win32_input_text(ev.text.text);
                 break;
-            }
             case SDL_MOUSEMOTION: {
                 float fx, fy;
                 gl_window_to_game_coords_f(ev.motion.x, ev.motion.y, &fx, &fy);
-                int gx = (int)(fx + 0.5f);
-                int gy = (int)(fy + 0.5f);
-                int dx = gx - g_mouse_x;
-                int dy = gy - g_mouse_y;
-                g_mouse_fx = fx;
-                g_mouse_fy = fy;
-                g_mouse_x = gx;
-                g_mouse_y = gy;
-                gl_renderer_set_live_mouse(fx, fy, g_os_cursor_hidden);
-                dinput_push_mouse_move(dx, dy, g_mouse_x, g_mouse_y);
-                uint32_t lp = ((uint32_t)(uint16_t)g_mouse_y << 16) | (uint16_t)g_mouse_x;
-                push_msg(g_main_hwnd, 0x0200u /* WM_MOUSEMOVE */, 0, lp);
+                win32_input_mouse_move(fx, fy);
                 break;
             }
             case SDL_MOUSEBUTTONDOWN:
             case SDL_MOUSEBUTTONUP: {
-                int down = (ev.type == SDL_MOUSEBUTTONDOWN);
                 float fx, fy;
                 gl_window_to_game_coords_f(ev.button.x, ev.button.y, &fx, &fy);
-                int gx = (int)(fx + 0.5f);
-                int gy = (int)(fy + 0.5f);
-                g_mouse_fx = fx;
-                g_mouse_fy = fy;
-                g_mouse_x = gx;
-                g_mouse_y = gy;
-                gl_renderer_set_live_mouse(fx, fy, g_os_cursor_hidden);
-                uint32_t lp = ((uint32_t)(uint16_t)g_mouse_y << 16) | (uint16_t)g_mouse_x;
-                if (ev.button.button == SDL_BUTTON_LEFT) {
-                    dinput_push_mouse_button(0, down);
-                    push_msg(g_main_hwnd, down ? 0x0201u : 0x0202u, down ? 1u : 0u, lp);
-                } else if (ev.button.button == SDL_BUTTON_RIGHT) {
-                    dinput_push_mouse_button(1, down);
-                    push_msg(g_main_hwnd, down ? 0x0204u : 0x0205u, down ? 2u : 0u, lp);
-                } else if (ev.button.button == SDL_BUTTON_MIDDLE) {
-                    dinput_push_mouse_button(2, down);
-                    push_msg(g_main_hwnd, down ? 0x0207u : 0x0208u, down ? 16u : 0u, lp);
-                }
+                int idx = ev.button.button == SDL_BUTTON_LEFT ? 0 :
+                          ev.button.button == SDL_BUTTON_RIGHT ? 1 :
+                          ev.button.button == SDL_BUTTON_MIDDLE ? 2 : -1;
+                win32_input_mouse_button(fx, fy, idx, ev.type == SDL_MOUSEBUTTONDOWN);
                 break;
             }
             case SDL_MOUSEWHEEL: {

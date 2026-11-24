@@ -289,6 +289,19 @@ def scan_msvc_eh_tables(pe, md):
     return found
 
 
+def follows_function_end(pe, va):
+    """True if va directly follows padding or a return (`ret`, `ret imm16`).
+
+    `ret imm16` (C2 xx xx) usually ends in 0x00, so checking only the previous
+    byte misses e.g. vtable-only methods placed right after a `ret 4`."""
+    off = va - pe.text_va
+    if off <= 0:
+        return True
+    if pe.text_bytes[off - 1] in (0x90, 0xcc, 0xc3):
+        return True
+    return off >= 3 and pe.text_bytes[off - 3] == 0xc2
+
+
 def discover_functions(pe, md, use_ghidra=True):
     func_entries = set()
     func_entries.add(pe.entry_va)
@@ -315,8 +328,7 @@ def discover_functions(pe, md, use_ghidra=True):
             # Check if bytes of v itself are 3 printable uppercase letters + 0x00 (e.g. "MEM\0", "SOF\0")
             b0, b1, b2, b3 = v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, (v >> 24) & 0xff
             if b3 == 0 and all(0x20 <= b <= 0x7e for b in (b0, b1, b2)):
-                prev_b = pe.text_bytes[v - pe.text_va - 1] if v > pe.text_va else 0x90
-                if not ((v & 0xf) == 0 or prev_b in (0x90, 0xcc, 0xc3, 0xc2)):
+                if not ((v & 0xf) == 0 or follows_function_end(pe, v)):
                     continue
             func_entries.add(v)
 
@@ -348,8 +360,7 @@ def discover_functions(pe, md, use_ghidra=True):
                     if op.type == cs_x86.X86_OP_IMM:
                         imm = op.imm & 0xffffffff
                         if pe.text_va <= imm < pe.text_end and imm not in func_entries and is_valid_code_start(pe, md, imm):
-                            prev_b = pe.text_bytes[imm - pe.text_va - 1] if imm > pe.text_va else 0x90
-                            if (imm & 0xf) == 0 or prev_b in (0x90, 0xcc, 0xc3, 0xc2):
+                            if (imm & 0xf) == 0 or follows_function_end(pe, imm):
                                 func_entries.add(imm)
                                 queue.append(imm)
 
@@ -516,7 +527,7 @@ def read_fpu_mem(op):
     raise ValueError(f"Unsupported FPU mem size {op.size}")
 
 
-def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch_tables):
+def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch_tables, flags_dead=False):
     m = ins.mnemonic
     ops = ins.operands
     next_va = ins.address + ins.size
@@ -550,7 +561,8 @@ def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch
     if m == "cmc":
         return ["c->cf ^= 1u;"]
     if m == "pushfd":
-        return ["push32(c, (c->cf) | 2u | (c->pf<<2) | (c->zf<<6) | (c->sf<<7) | (c->df<<10) | (c->of<<11));"]
+        # Bit 1 is reserved-1; IF (bit 9) is always set in Windows user mode (0x202 baseline)
+        return ["push32(c, (c->cf) | 0x202u | (c->pf<<2) | (c->zf<<6) | (c->sf<<7) | (c->df<<10) | (c->of<<11));"]
     if m == "popfd":
         return ["{ uint32_t f = pop32(c); c->cf = f&1; c->pf = (f>>2)&1; c->zf = (f>>6)&1; c->sf = (f>>7)&1; c->df = (f>>10)&1; c->of = (f>>11)&1; }"]
     if m == "pushal":
@@ -605,13 +617,19 @@ def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch
             opch = {"and": "&", "or": "|", "xor": "^"}[m]
             fn = f"alu_logic{bits}"
             if ops[0].type == cs_x86.X86_OP_MEM:
+                if flags_dead:
+                    return [f"{{ uint32_t _a = {mem_addr_expr(ops[0])}; mem_w{bits}(_a, ({ut})(mem_r{bits}(_a) {opch} ({ut})({read_op(ops[1], sz)}))); }}"]
                 return [f"{{ uint32_t _a = {mem_addr_expr(ops[0])}; mem_w{bits}(_a, {fn}(c, ({ut})(mem_r{bits}(_a) {opch} ({ut})({read_op(ops[1], sz)})))); }}"]
+            if flags_dead:
+                return [write_op(ops[0], f"({ut})({read_op(ops[0])} {opch} ({ut})({read_op(ops[1], sz)}))")]
             return [write_op(ops[0], f"{fn}(c, ({ut})({read_op(ops[0])} {opch} ({ut})({read_op(ops[1], sz)})))")]
         else:
-            fn = f"alu_{m}{bits}"
+            nf = flags_dead and m in ("add", "sub")
+            fn = f"nf_{m}{bits}" if nf else f"alu_{m}{bits}"
+            ctx = "" if nf else "c, "
             if ops[0].type == cs_x86.X86_OP_MEM:
-                return [f"{{ uint32_t _a = {mem_addr_expr(ops[0])}; mem_w{bits}(_a, {fn}(c, mem_r{bits}(_a), ({ut})({read_op(ops[1], sz)}))); }}"]
-            return [write_op(ops[0], f"{fn}(c, {read_op(ops[0])}, ({ut})({read_op(ops[1], sz)}))")]
+                return [f"{{ uint32_t _a = {mem_addr_expr(ops[0])}; mem_w{bits}(_a, {fn}({ctx}mem_r{bits}(_a), ({ut})({read_op(ops[1], sz)}))); }}"]
+            return [write_op(ops[0], f"{fn}({ctx}{read_op(ops[0])}, ({ut})({read_op(ops[1], sz)}))")]
 
     # LOCK ADD / SUB / INC / DEC / XADD / CMPXCHG
     if m == "lock inc":
@@ -631,6 +649,8 @@ def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch
         return [f"{{ uint32_t _a = {mem_addr_expr(ops[0])}; {ut} _add = ({ut})({read_op(ops[1], sz)}); {ut} _old = __atomic_fetch_add(({ut} *)(g_mem + _a), _add, __ATOMIC_SEQ_CST); alu_add{bits}(c, _old, _add); }}"]
 
     # CMP / TEST
+    if m in ("cmp", "test") and flags_dead:
+        return []  # flags never read: compare/test has no other effect
     if m == "cmp":
         sz = ops[0].size
         bits = sz * 8
@@ -646,10 +666,11 @@ def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch
     if m in ("inc", "dec", "neg"):
         sz = ops[0].size
         bits = sz * 8
-        fn = f"alu_{m}{bits}"
+        fn = f"nf_{m}{bits}" if flags_dead else f"alu_{m}{bits}"
+        ctx = "" if flags_dead else "c, "
         if ops[0].type == cs_x86.X86_OP_MEM:
-            return [f"{{ uint32_t _a = {mem_addr_expr(ops[0])}; mem_w{bits}(_a, {fn}(c, mem_r{bits}(_a))); }}"]
-        return [write_op(ops[0], f"{fn}(c, {read_op(ops[0])})")]
+            return [f"{{ uint32_t _a = {mem_addr_expr(ops[0])}; mem_w{bits}(_a, {fn}({ctx}mem_r{bits}(_a))); }}"]
+        return [write_op(ops[0], f"{fn}({ctx}{read_op(ops[0])})")]
     if m == "not":
         sz = ops[0].size
         bits = sz * 8
@@ -665,10 +686,12 @@ def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch
         cnt = read_op(ops[1], 1) if len(ops) == 2 else "1u"
         if nm in ("rcr", "rcl") and bits != 32:
             raise ValueError(f"Unsupported {nm} width {bits}")
-        fn = f"alu_{nm}{bits}"
+        nf = flags_dead and nm in ("shl", "shr", "sar")
+        fn = f"nf_{nm}{bits}" if nf else f"alu_{nm}{bits}"
+        ctx = "" if nf else "c, "
         if ops[0].type == cs_x86.X86_OP_MEM:
-            return [f"{{ uint32_t _a = {mem_addr_expr(ops[0])}; mem_w{bits}(_a, {fn}(c, mem_r{bits}(_a), {cnt})); }}"]
-        return [write_op(ops[0], f"{fn}(c, {read_op(ops[0])}, {cnt})")]
+            return [f"{{ uint32_t _a = {mem_addr_expr(ops[0])}; mem_w{bits}(_a, {fn}({ctx}mem_r{bits}(_a), {cnt})); }}"]
+        return [write_op(ops[0], f"{fn}({ctx}{read_op(ops[0])}, {cnt})")]
 
     if m in ("shld", "shrd"):
         sz = ops[0].size
@@ -690,10 +713,12 @@ def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch
             return [f"alu_imul1_{bits}(c, {read_op(ops[0])});"]
         elif len(ops) == 2:
             bits = ops[0].size * 8
-            return [write_op(ops[0], f"alu_imul2_{bits}(c, {read_op(ops[0])}, {read_op(ops[1], ops[0].size)})")]
+            fn = f"nf_imul2_{bits}(" if flags_dead else f"alu_imul2_{bits}(c, "
+            return [write_op(ops[0], f"{fn}{read_op(ops[0])}, {read_op(ops[1], ops[0].size)})")]
         elif len(ops) == 3:
             bits = ops[0].size * 8
-            return [write_op(ops[0], f"alu_imul2_{bits}(c, {read_op(ops[1])}, {read_op(ops[2], ops[0].size)})")]
+            fn = f"nf_imul2_{bits}(" if flags_dead else f"alu_imul2_{bits}(c, "
+            return [write_op(ops[0], f"{fn}{read_op(ops[1])}, {read_op(ops[2], ops[0].size)})")]
     if m == "div":
         bits = ops[0].size * 8
         return [f"alu_div{bits}(c, {read_op(ops[0])});"]
@@ -868,7 +893,8 @@ def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch
         addr = mem_addr_expr(ops[0])
         wfn = {2: "mem_w16", 4: "mem_w32", 8: "mem_w64"}[ops[0].size]
         ut = {2: "uint16_t", 4: "uint32_t", 8: "uint64_t"}[ops[0].size]
-        return [f"{wfn}({addr}, ({ut})fpu_round_i64(c, fpu_st(c, 0)));{pop_code}"]
+        bits = ops[0].size * 8
+        return [f"{wfn}({addr}, ({ut})fpu_to_int(c, fpu_st(c, 0), {bits}));{pop_code}"]
 
     if m in ("fadd", "faddp", "fmul", "fmulp", "fsub", "fsubp", "fsubr", "fsubrp", "fdiv", "fdivp", "fdivr", "fdivrp"):
         pop = m.endswith("p")
@@ -1012,6 +1038,14 @@ def lift_instruction(ins, pe, func_va, func_entries_set, local_insns_set, switch
     raise ValueError(f"Unhandled instruction at 0x{ins.address:08x}: {m} {ins.op_str}")
 
 
+LIFT_STATS = collections.Counter()
+
+
+def stmts_set_flags(stmts):
+    """True if emitted statements still compute flags via an alu_* helper."""
+    return any("alu_" in st for st in stmts)
+
+
 # Original-game functions patched at runtime via g_code_table (runtime/game_patches.c).
 # Direct calls to these VAs are dispatched through g_code_table so runtime patches take effect.
 HOOKABLE_FUNCS = {
@@ -1023,6 +1057,216 @@ HOOKABLE_FUNCS = {
 
 # Exact instruction VAs in 0x00474fd0 that dereference ESI before `test esi, esi; je`
 ESI_NULL_GUARD_VAS = {0x0047530E, 0x00475317}
+
+# Original-game bugfixes spliced in as C statements emitted *before* the instruction at
+# the given VA (after its label, so every incoming edge is covered).
+GUEST_BUGFIX_INSERTS = {
+    # 0x0042a820 weighted random pick (ambient/idle variant pools, items vt 0x00507998):
+    # if no item is available yet (resources still loading on the background loader
+    # thread) the selection stays -1 and the original code calls arr[-1]->vfn(0xfa6) and
+    # decrements arr[-1]->weight, i.e. dereferences/corrupts the heap block header.
+    # Take the function's own empty-pool exit instead (stack: ebx, edi, esi, ebp pushed).
+    0x0042A8E4: (
+        "if ((int32_t)mem_r32(c->esi + 0xb0u) < 0) { "
+        "mem_w32(c->esi + 0xb4u, 0u); c->eax = 0u; "
+        "c->ebx = pop32(c); c->edi = pop32(c); c->esi = pop32(c); c->ebp = pop32(c); "
+        "c->esp += 4u; return; } /* bugfix: no available item, skip instead of arr[-1] */"
+    ),
+}
+
+# Guest globals used as hand-rolled InterlockedIncrement-style spinlock counters
+# (-1 = free, 0 = held) via NON-atomic `mov r32,[X]; inc/dec r32; mov [X],r32`.
+# MSVC inlined the acquire/release into every ObjMutex method, so patching the
+# out-of-line MetaSpinLock::Lock alone is not enough. Every such triple is lifted
+# as one atomic RMW, and every other plain store to X (the original's forced
+# "lock-steal" after 200 failed Sleep(1) retries) becomes a blocking acquire.
+ATOMIC_COUNTER_GLOBALS = {
+    0x0051B3B8,  # MetaSpinLock counter guarding all ObjMutex state (owner TID at 0x00527824)
+}
+
+
+def _is_abs_mem(op, va):
+    return (op.type == cs_x86.X86_OP_MEM and op.mem.base == 0 and op.mem.index == 0
+            and op.mem.segment == 0 and (op.mem.disp & 0xffffffff) == va)
+
+
+def _touches_global(ins, va):
+    return any(_is_abs_mem(op, va) for op in ins.operands)
+
+
+def find_atomic_counter_rewrites(sorted_vas, local_insns, jump_targets):
+    """Return {va: (c_stmts, covered_vas)} for spinlock-counter accesses.
+
+    Raises ValueError on any access pattern to an ATOMIC_COUNTER_GLOBALS address
+    that is not a recognized RMW triple or plain store, so new patterns are never
+    silently lifted non-atomically.
+    """
+    rewrites = {}
+    covered = set()
+    for idx, va in enumerate(sorted_vas):
+        if va in covered:
+            continue
+        ins = local_insns[va]
+        for gva in ATOMIC_COUNTER_GLOBALS:
+            if not _touches_global(ins, gva):
+                continue
+            ops = ins.operands
+            # RMW triple: mov r32,[X] ; inc/dec r32 ; mov [X],r32 (contiguous, no labels inside)
+            if (ins.mnemonic == "mov" and len(ops) == 2 and ops[0].type == cs_x86.X86_OP_REG
+                    and ops[0].reg in REG32_MAP and _is_abs_mem(ops[1], gva) and idx + 2 < len(sorted_vas)):
+                i1, i2 = local_insns[sorted_vas[idx + 1]], local_insns[sorted_vas[idx + 2]]
+                reg = ops[0].reg
+                if (i1.address == va + ins.size and i2.address == i1.address + i1.size
+                        and i1.address not in jump_targets and i2.address not in jump_targets
+                        and i1.mnemonic in ("inc", "dec") and i1.operands[0].type == cs_x86.X86_OP_REG
+                        and i1.operands[0].reg == reg and i2.mnemonic == "mov"
+                        and _is_abs_mem(i2.operands[0], gva) and i2.operands[1].type == cs_x86.X86_OP_REG
+                        and i2.operands[1].reg == reg):
+                    fetch = "__atomic_fetch_add" if i1.mnemonic == "inc" else "__atomic_fetch_sub"
+                    alu = "alu_inc32" if i1.mnemonic == "inc" else "alu_dec32"
+                    stmt = (f"{{ uint32_t _o = {fetch}((uint32_t *)(g_mem + 0x{gva:x}u), 1u, __ATOMIC_SEQ_CST); "
+                            f"{write_op(ops[0], f'{alu}(c, _o)')} }} /* atomic {i1.mnemonic} spinlock counter */")
+                    rewrites[va] = ([stmt], {i1.address, i2.address})
+                    covered.update((i1.address, i2.address))
+                    break
+            # Plain store (forced lock-steal `mov [X], 0` / `mov [X], reg`): block until acquired instead
+            if (ins.mnemonic == "mov" and len(ops) == 2 and _is_abs_mem(ops[0], gva)
+                    and (ops[1].type == cs_x86.X86_OP_REG or (ops[1].type == cs_x86.X86_OP_IMM and ops[1].imm == 0))):
+                rewrites[va] = ([f"guest_spin_acquire(0x{gva:08x}u); /* was forced lock-steal */"], set())
+                break
+            raise ValueError(f"Unrecognized access to atomic counter 0x{gva:08x} at 0x{va:08x}: "
+                             f"{ins.mnemonic} {ins.op_str}")
+    return rewrites
+
+
+
+# ---- Flag liveness (dead flag elimination) ----
+# Bits: CF=1 ZF=2 SF=4 OF=8 PF=16. A flag-setting instruction whose written flags are
+# all dead (no read on any path before being overwritten) is emitted with a flag-free
+# nf_* helper (runtime/cpu.h). Kill sets mirror exactly what the alu_* helpers write
+# unconditionally (shift/rotate by CL or 0 and rep cmps/scas may write nothing -> no kill).
+# Conservative boundaries treat ALL flags as live: call, ret, tail/indirect jumps,
+# HOOKABLE edges and GUEST_BUGFIX_INSERTS (inserted early returns).
+F_CF, F_ZF, F_SF, F_OF, F_PF = 1, 2, 4, 8, 16
+F_ALL = 31
+FLAG_FIELDS = (("cf", F_CF), ("zf", F_ZF), ("sf", F_SF), ("of", F_OF), ("pf", F_PF))
+FLAG_ELIM = os.environ.get("MHA2_LIFT_NOFLAGELIM", "") == ""
+FLAG_CHECK = os.environ.get("MHA2_LIFT_FLAGCHECK", "") != ""
+
+
+def flags_in_expr(expr):
+    return sum(bit for name, bit in FLAG_FIELDS if f"c->{name}" in expr)
+
+
+def flag_effects(ins):
+    """(use, kill) flag masks of one instruction as emitted by lift_instruction."""
+    m, ops = ins.mnemonic, ins.operands
+    if m in JCC_COND:
+        return flags_in_expr(JCC_COND[m]), 0
+    if m in SETCC_COND:
+        return flags_in_expr(SETCC_COND[m]), 0
+    if m.startswith("cmov") and ("j" + m[4:]) in JCC_COND:
+        return flags_in_expr(JCC_COND["j" + m[4:]]), 0
+    if m in ("add", "sub", "and", "or", "xor", "cmp", "test", "neg", "lock add"):
+        return 0, F_ALL
+    if m in ("adc", "sbb"):
+        return F_CF, F_ALL
+    if m in ("inc", "dec", "lock inc", "lock dec"):
+        return 0, F_ZF | F_SF | F_OF | F_PF
+    if m in ("shl", "sal", "shr", "sar", "shld", "shrd", "rol", "ror", "rcl", "rcr"):
+        use = F_CF if m in ("rcl", "rcr") else 0
+        cnt_op = ops[-1] if (len(ops) == 2 and m not in ("shld", "shrd")) or len(ops) == 3 else None
+        if cnt_op is None:
+            n = 1
+        elif cnt_op.type == cs_x86.X86_OP_IMM:
+            n = cnt_op.imm & 31
+        else:
+            return use, 0  # count in CL: may write nothing
+        if n == 0:
+            return use, 0
+        base = F_CF if m in ("rol", "ror", "rcl", "rcr") else (F_CF | F_ZF | F_SF | F_PF)
+        return use, base | (F_OF if n == 1 else 0)
+    if m in ("mul", "imul"):
+        return 0, F_CF | F_OF
+    if m in ("bt", "bts", "btr", "btc"):
+        return 0, F_CF
+    if m in ("bsf", "bsr"):
+        return 0, F_ZF
+    if m in ("clc", "stc"):
+        return 0, F_CF
+    if m == "cmc":
+        return F_CF, F_CF
+    if m == "sahf":
+        return 0, F_CF | F_ZF | F_SF | F_PF
+    if m == "lahf":
+        return F_CF | F_ZF | F_SF | F_PF, 0
+    if m == "pushfd":
+        return F_ALL, 0
+    if m == "popfd":
+        return 0, F_ALL
+    if m in ("call", "ret", "retn"):
+        return F_ALL, 0
+    return 0, 0
+
+
+def flag_successors(ins, local_set, switch_tables):
+    """Local successor VAs, plus True if control may leave the function (all flags live)."""
+    m, ops = ins.mnemonic, ins.operands
+    nxt = ins.address + ins.size
+    if m in ("ret", "retn"):
+        return [], True
+    if m in ("int3", "ud2", "hlt"):
+        return [], False
+    succ, leaves = [], False
+
+    def edge(t):
+        nonlocal leaves
+        if t in local_set and t not in HOOKABLE_FUNCS:
+            succ.append(t)
+        else:
+            leaves = True
+
+    if m == "jmp":
+        if ops[0].type == cs_x86.X86_OP_IMM:
+            edge(ops[0].imm & 0xffffffff)
+        else:
+            leaves = True
+            if ins.address in switch_tables:
+                for t in set(switch_tables[ins.address][1]):
+                    edge(t)
+        return succ, leaves
+    if m in JCC_COND or m == "loop":
+        edge(ops[0].imm & 0xffffffff)
+    edge(nxt)
+    return succ, leaves
+
+
+def compute_flag_liveness(sorted_vas, local_insns, local_set, switch_tables):
+    """Backward dataflow; returns {va: live_out_mask}."""
+    eff, succs = {}, {}
+    for va in sorted_vas:
+        ins = local_insns[va]
+        use, kill = flag_effects(ins)
+        if va in GUEST_BUGFIX_INSERTS:
+            use = F_ALL
+        eff[va] = (use, kill)
+        succs[va] = flag_successors(ins, local_set, switch_tables)
+    live_in = {va: 0 for va in sorted_vas}
+    live_out = {va: 0 for va in sorted_vas}
+    changed = True
+    while changed:
+        changed = False
+        for va in reversed(sorted_vas):
+            s_list, leaves = succs[va]
+            out = F_ALL if leaves else 0
+            for t in s_list:
+                out |= live_in.get(t, F_ALL)
+            use, kill = eff[va]
+            inn = use | (out & ~kill)
+            if out != live_out[va] or inn != live_in[va]:
+                live_out[va], live_in[va] = out, inn
+                changed = True
+    return live_out, eff
 
 
 def lift_function(pe, md, func_va, func_entries_set, switch_tables):
@@ -1091,6 +1335,12 @@ def lift_function(pe, md, func_va, func_entries_set, switch_tables):
             if nxt != next_in_list and nxt in local_set:
                 jump_targets.add(nxt)
 
+    flag_live_out, flag_eff = compute_flag_liveness(sorted_vas, local_insns, local_set, switch_tables)
+    atomic_rewrites = find_atomic_counter_rewrites(sorted_vas, local_insns, jump_targets)
+    atomic_covered = set()
+    for _, cov in atomic_rewrites.values():
+        atomic_covered |= cov
+
     out = [f"void sub_{func_va:08x}(CpuCtx *c) {{"]
     if sorted_vas and sorted_vas[0] != func_va:
         out.append(f"  goto L_{func_va:08x};")
@@ -1099,7 +1349,23 @@ def lift_function(pe, md, func_va, func_entries_set, switch_tables):
         ins = local_insns[va]
         if va in jump_targets:
             out.append(f"L_{va:08x}:;")
-        stmts = lift_instruction(ins, pe, func_va, func_entries_set, local_set, switch_tables)
+        if va in GUEST_BUGFIX_INSERTS:
+            out.append(f"  {GUEST_BUGFIX_INSERTS[va]}")
+        if va in atomic_rewrites:
+            stmts = atomic_rewrites[va][0]
+        elif va in atomic_covered:
+            stmts = []
+        else:
+            use, kill = flag_eff[va]
+            flags_dead = FLAG_ELIM and kill != 0 and (kill & flag_live_out[va]) == 0
+            stmts = lift_instruction(ins, pe, func_va, func_entries_set, local_set, switch_tables,
+                                     flags_dead=flags_dead)
+            if flags_dead and not stmts_set_flags(stmts):
+                LIFT_STATS["flag_elim"] += 1
+                if FLAG_CHECK:
+                    stmts = stmts + [" ".join(f"c->{n} = FLAG_POISON;" for n, b in FLAG_FIELDS if kill & b)]
+            if FLAG_CHECK and use and use != F_ALL:
+                stmts = [f"flag_check(c, {use}u, 0x{va:08x}u);"] + stmts
         if va in ESI_NULL_GUARD_VAS:
             for st in stmts:
                 out.append(f"  if (c->esi) {{ {st} }}")
@@ -1202,6 +1468,7 @@ def main():
 
     print(f"Lifted {len(func_entries)} functions ({total_lifted_insns} instructions) into {NUM_CHUNKS} C chunks.")
     print(f"Lift errors: {len(errors)}")
+    print(f"Dead flag eliminations: {LIFT_STATS['flag_elim']}" + ("" if FLAG_ELIM else " (disabled)") + (" [FLAGCHECK poison mode]" if FLAG_CHECK else ""))
     for va, err in errors[:30]:
         print(f"  ERROR 0x{va:08x}: {err}")
 

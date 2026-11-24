@@ -27,17 +27,10 @@ extern char g_game_dir[1024];
 extern volatile int g_quit_requested;
 extern int g_debug_log;
 
-/* Memory & Guest Allocator (cpu.c) */
-void runtime_mem_init(void);
+/* PE loading & code table (cpu.c); guest memory & heap allocator live in cpu.h / guest_mem.c */
 int  runtime_load_pe(const char *exe_path);
 void init_code_table(void);
 
-uint32_t guest_alloc(uint32_t size);
-uint32_t guest_realloc(uint32_t addr, uint32_t new_size);
-void     guest_free(uint32_t addr);
-uint32_t guest_alloc_size(uint32_t addr);
-uint32_t guest_alloc_static(const void *data, uint32_t size);
-uint32_t guest_alloc_cstr(const char *s);
 uint32_t com_get_vtable(uint32_t iface_id, uint32_t num_slots);
 uint32_t com_create_obj(uint32_t iface_id, uint32_t num_slots, uint32_t handle_val);
 uint32_t com_obj_handle(uint32_t obj_va);
@@ -120,6 +113,7 @@ typedef struct DDrawSurface {
 DDrawSurface *ddraw_get_surface(uint32_t handle);
 void ddraw_surface_add_text(DDrawSurface *s, const GlTextDraw *td);
 void ddraw_present_surface(DDrawSurface *surf);
+uint64_t ddraw_last_frame_hash(uint32_t *out_w, uint32_t *out_h);
 void ddraw_present_rgb24(const uint8_t *rgb, int w, int h, int stride);
 void ddraw_install_rle_hooks(void);
 void game_patches_install(void);

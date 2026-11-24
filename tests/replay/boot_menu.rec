@@ -1,0 +1,12 @@
+# Quick boot test: intro video -> skip -> main menu -> chapter select.
+wait video 60
+1000 tap Escape
+wait menu 60
+1500 expect menu
++0 shot 01_main_menu
++0 hash main_menu
++0 click 60 553
+wait room x/006 30
+1500 shot 02_chapter_select
++0 hash chapter_select
++300 quit

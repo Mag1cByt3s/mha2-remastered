@@ -1,0 +1,48 @@
+# Quick save / quick load (Ctrl+S / Ctrl+O, quick slot 9) regression test.
+# New game -> l/001 -> Ctrl+S -> walk to l/005 -> Ctrl+O must return to l/001 ->
+# Ctrl+S again must overwrite the slot cleanly (name "Quicksave", not appended).
+# Guards: quick save/load at the main menu, during the opening monologue and without a
+# quick save must be rejected without injecting any input.
+# Macros run atomically from the script's point of view (the script is paused).
+wait video 60
+1000 tap Escape
+wait menu 60
+1500 quicksave
++300 quickload
++1500 expect menu
+1500 click 60 553
+wait room x/006 30
+1500 click 114 566
++2000 tap Escape
+wait room l/001 30
+500 quicksave
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++11000 expect hotspots 15
++0 key down Left Ctrl
++50 tap S
++100 key up Left Ctrl
+3000 expect room l/001
++0 savecheck 9
++0 clickspot Tür
+wait room l/005 30
+3000 key down Left Ctrl
++50 tap O
++100 key up Left Ctrl
+wait room l/001 30
+3000 expect room l/001
++0 shot 01_after_quickload
++0 expect hotspots 15
++0 key down Left Ctrl
++50 tap S
++100 key up Left Ctrl
+3000 tap Escape
+wait room x/006 15
+1500 shotfull 02_slot_label
++0 tap Escape
+wait leave x/006 15
+2000 expect room l/001
++500 quit

@@ -160,6 +160,7 @@ typedef struct ModernConfig {
     int scene_transitions;  /* F1: smooth GPU crossfade on room/menu switches */
     int video_enhance;      /* F1: GPU deblocking + sharpening on FMV cutscenes */
     int display_index;      /* F1: target monitor index for multi-monitor fullscreen (0=Display 1) */
+    int overlay_text_scale; /* F1: % size of remaster overlay text (dialog log, hotspot labels, toasts) */
     char hd_assets_dir[512];/* default "hd_assets" */
 } ModernConfig;
 
@@ -233,6 +234,10 @@ void gl_renderer_show_toast(const char *fmt, ...);
 int  gl_menu_is_open(void);
 void gl_menu_toggle(void);
 int  gl_menu_handle_event(const SDL_Event *ev);
+/* 4. CONTROLS tab waits for a key to bind: raw key events must go to the menu first */
+int  gl_menu_is_capturing_key(void);
+/* windowID marking menu key events synthesized from controller buttons */
+#define GL_MENU_PAD_SYNTH 0xFFFFFFFFu
 
 void gl_window_to_game_coords(int win_x, int win_y, int *out_gx, int *out_gy);
 void gl_window_to_game_coords_f(int win_x, int win_y, float *out_gx, float *out_gy);
@@ -252,6 +257,11 @@ float gl_renderer_get_speed_mult(void);
 void  gl_renderer_set_hotspot_highlight(int active);
 void  gl_renderer_toggle_compare_split(void);
 void  gl_renderer_request_screenshot(void);
+/* SDL window ID of the game window (0 before init); used to tag injected input. */
+uint32_t gl_renderer_window_id(void);
+/* Screenshot of the next frame to an explicit PNG path (replay `shot` / `shotfull`):
+ * full_frame = 0 captures the clean game image, 1 the final frame incl. overlays. */
+void  gl_renderer_request_screenshot_to(const char *path, int full_frame);
 void  gl_renderer_log_dialog(const char *utf8);
 void  gl_renderer_toggle_dialog_log(void);
 int   gl_renderer_is_dialog_log_open(void);

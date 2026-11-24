@@ -4,11 +4,15 @@
 set -euo pipefail
 
 MAKE_ARCHIVE=1
+SPLIT=0
 for arg in "$@"; do
     case "$arg" in
         --no-archive) MAKE_ARCHIVE=0 ;;
+        --split) SPLIT=1 ;;
         *)
-            echo "Usage: $0 [--no-archive]" >&2
+            echo "Usage: $0 [--no-archive] [--split]" >&2
+            echo "  --split  small runtime archive (no game files, no HD assets) + separate HD asset" >&2
+            echo "           tar + SHA256SUMS; players supply their own game files" >&2
             exit 2
             ;;
     esac
@@ -160,12 +164,26 @@ mkdir -p "$STAGE/lib" "$STAGE/fonts" "$STAGE/game_files/mha2.sav" "$ROOT/work/bu
     echo "[pack] ABI & portability verification passed!"
 '
 
-# Copy original game files (without personal saves)
-cp "$ROOT/game_files/mha2.dat" "$ROOT/game_files/mha2.exe" "$STAGE/game_files/"
-cp "$ROOT/game_files/"*.avi "$STAGE/game_files/"
+if [[ "$SPLIT" -eq 1 ]]; then
+    # Runtime-only: players supply their own game files (tools/extract_game.py) and the
+    # HD asset pack ships separately, so engine updates stay small.
+    cat > "$STAGE/game_files/PUT_GAME_FILES_HERE.txt" << 'GAMEFILES_EOF'
+Copy mha2.dat, mha2.exe and the six *.avi files of your own copy of
+"Moorhuhn Adventure 2: Der Fluch des Goldes" into this folder
+(or into ~/.local/share/mha2-remastered/game_files/).
+Use tools/extract_game.py from the source repository to extract them from the
+original installer or CD image.
+GAMEFILES_EOF
+    mkdir -p "$STAGE/docs"
+    cp "$ROOT/docs/STEAM_DECK.md" "$ROOT/docs/INSTALL.md" "$STAGE/docs/"
+else
+    # Copy original game files (without personal saves)
+    cp "$ROOT/game_files/mha2.dat" "$ROOT/game_files/mha2.exe" "$STAGE/game_files/"
+    cp "$ROOT/game_files/"*.avi "$STAGE/game_files/"
 
-# Copy complete 4K hd_assets (backgrounds, sprites, cursors, 4K MP4 videos, caches)
-cp -a --reflink=auto "$ROOT/hd_assets" "$STAGE/hd_assets"
+    # Copy complete 4K hd_assets (backgrounds, sprites, cursors, 4K MP4 videos, caches)
+    cp -a --reflink=auto "$ROOT/hd_assets" "$STAGE/hd_assets"
+fi
 
 # Write portable launcher script (rely on ELF $ORIGIN/lib RUNPATH so host GPU/audio libs never conflict)
 cat > "$STAGE/PLAY.sh" << 'EOF'
@@ -194,25 +212,39 @@ HOW TO PLAY:
   Windowed mode:
     ./PLAY.sh --windowed
 
-CONTROLS & SHORTCUTS:
+CONTROLS & SHORTCUTS (defaults; rebind in F1 -> 4. CONTROLS):
   Left Click     Interact / Walk
   Right Click    Cycle action cursor (Look / Take / Talk / Use)
-  F1             Open Remaster v5 Graphics, Post-FX & Audio Settings Menu
+  F1             Settings menu (Display, Post-FX, Assets & Text, Controls)
   F2             Live Split-Screen Before / After (2005 vs 4K Remaster)
   Space or H     Hold to highlight interactive hotspots in the room
   Shift          Hold for 2x fast-walk speed
+  Ctrl + S / O   Quick Save / Quick Load (slot 9)
+  Ctrl + L       Dialog & clue history
   Ctrl + P       Save a clean 4K PNG screenshot (saved to screenshots/)
   Alt + Enter    Toggle Fullscreen / Windowed
   F3             Toggle FPS / Remaster HUD
   F7 / F8 / F9   Volume Down / Up / Mute
-  Gamepad        Left Stick = Cursor, A = Click, B = Right-Click, X = Hotspots, Start = F1 Menu
+  Gamepad        Left Stick = Cursor, A = Click, B = Right-Click, X = Hotspots,
+                 Back = F1 Menu, Start = Esc, D-pad Up/Down = Quick Save/Load
 
 REQUIREMENTS:
   64-bit Linux (Ubuntu 22.04+, Fedora 39+, Debian 12+, Arch, Mint 21+, SteamOS, etc.)
   with OpenGL 3.3+ graphics drivers.
 EOF
 
-if [[ "$MAKE_ARCHIVE" -eq 1 ]]; then
+if [[ "$MAKE_ARCHIVE" -eq 1 && "$SPLIT" -eq 1 ]]; then
+    RT_ARCHIVE="$ROOT/work/dist/${DIST_NAME}_Runtime.tar.gz"
+    HD_ARCHIVE="$ROOT/work/dist/Moorhuhn_Adventure2_Remastered_HD_Assets.tar"
+    echo "[pack] Creating runtime archive $RT_ARCHIVE ..."
+    tar -czf "$RT_ARCHIVE" -C "$ROOT/work/dist" "$DIST_NAME"
+    # WebP/MP4 are already compressed: plain tar, rooted at the same top-level folder so
+    # both archives extract into one directory.
+    echo "[pack] Creating HD asset pack $HD_ARCHIVE ..."
+    tar -cf "$HD_ARCHIVE" -C "$ROOT" --transform "s,^hd_assets,$DIST_NAME/hd_assets," hd_assets
+    (cd "$ROOT/work/dist" && sha256sum "$(basename "$RT_ARCHIVE")" "$(basename "$HD_ARCHIVE")" > SHA256SUMS)
+    ls -lh "$RT_ARCHIVE" "$HD_ARCHIVE" "$ROOT/work/dist/SHA256SUMS"
+elif [[ "$MAKE_ARCHIVE" -eq 1 ]]; then
     echo "[pack] Creating archive $ARCHIVE ..."
     GZIP=-1 tar -czf "$ARCHIVE" -C "$ROOT/work/dist" "$DIST_NAME"
     ls -lh "$ARCHIVE"

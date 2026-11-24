@@ -4,6 +4,36 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
+## [v5.4 — Correctness Hardening, Replay Test Harness, Quick Save, Rebindable Controls & Split Release] (2026-11-24)
+
+### Original 2005 Game Bugfixes (`recomp/lift.py`, `runtime/game_patches.c`, `runtime/guest_sync.c`)
+- **Inlined Non-Atomic Spinlock Fixed Everywhere**: the v5.2 fix only patched `MetaSpinLock::Lock` (`0x004443f0`); MSVC had inlined the same `mov/inc/mov` lock + forced 200 ms lock-steal into six more `ObjMutex` methods. New lifter peephole `ATOMIC_COUNTER_GLOBALS` turns all 52 counter read-modify-writes into atomic RMWs and the 9 forced steals into a blocking acquire; `TryLock` again holds the meta-lock around its check-and-set (`tests/test_guest_sync.c`).
+- **Ambient Variant Pick Crash (`0x0042a820`)**: picking a random variant before any of its resources finished loading indexed `arr[-1]` (virtual call through the heap header + weight decrement inside it). New `GUEST_BUGFIX_INSERTS` lifter hook takes the function's own empty-pool exit. Found by the new replay harness under `--strict-mem`.
+- **Hotspot Highlighter (`Space`/`H`) Dead in Most Rooms**: rooms/minigames with custom logic are subclasses with their own vtables (11 Location + 5 Minigame) and were rejected by an exact vtable match; the `(scene+0x6c)->+0x80` "dialog" guard read `2` in ordinary idle rooms. Now inheritance-based, with markers suppressed only while dialog choices are shown.
+
+### Static Recompiler & x86 Semantics (`recomp/lift.py`, `runtime/cpu.h`)
+- **Dead Flag Elimination**: per-function flag liveness removes 27,698 of 68,740 flag computations (−40%, `.text` −6%); validated by a poison-check lift mode (`MHA2_LIFT_FLAGCHECK=1`) over the full replay suite plus a negative control.
+- **Function Discovery Fix**: data-pointer scan missed functions placed after `ret imm16`; recovers `exception::what()` (`0x004a6749`) and an SEH filter (8,134 → 8,136 functions).
+- **x87 & Integer Exactness**: `FIST`/`FISTP` m16/m32 store x87 "integer indefinite" instead of wrapped values (bit-exact vs host x87 over 800k cases); `div`/`idiv` raise a reported `#DE` on zero divisor / quotient overflow instead of a host trap or silent truncation; `pushfd` sets IF.
+
+### Runtime Robustness & Diagnostics (`runtime/guest_mem.c`, `runtime/crash_handler.c`)
+- **Guarded 4 GiB Guest Window**: whole 32-bit window reserved `PROT_NONE`, only the used 1.5 GiB committed — wild guest pointers fault instead of corrupting host memory.
+- **Crash Reports**: `SIGSEGV/SIGBUS/SIGFPE/SIGILL/SIGABRT` on an alternate stack print the guest fault address & region, guest registers and a symbolized guest call stack (`sub_<VA>` frames via `-rdynamic`) to stderr and `mha2_crash.log`; guest C++ exceptions report type, `what()` and throw site.
+- **`--strict-mem`** debug flag protects the guest NULL page; explicit 32 MiB host stacks for guest threads.
+
+### New Features
+- **Quick Save / Quick Load (`Ctrl+S` / `Ctrl+O`, D-pad Up/Down)**: macros drive the game's own save screen into slot 9 (original save code & thumbnails), never overwrite a manual save in that slot, and are refused during cutscenes, dialogs and menus.
+- **Rebindable Controls (`F1` → `4. CONTROLS`)**: 18 actions with two key chords each, controller buttons via `pad_*` in `mha2_settings.ini`, conflict handling, reset to defaults; UI hints follow the live bindings. Steam Deck guide in `docs/STEAM_DECK.md`.
+- **Overlay Text Size (`F1` → `3. ASSETS & TEXT`)**: 100–200% for the dialog log (now word-wrapped), hotspot labels and toasts.
+- **Split Linux Release (`tools/package_portable_linux.sh --split`)**: 12 MB runtime archive without game files + separate 5 GB HD asset tar + `SHA256SUMS`; shared data directory `~/.local/share/mha2-remastered/` (`docs/INSTALL.md`).
+
+### Testing & Code Structure
+- **Input Record/Replay (`--record` / `--replay`) & `tools/regress.sh` (`make regress`)**: sync-point-based scripts (`wait video|menu|room|interactive`), guest-coordinate mouse injection, `clickspot <label>`, controller injection, screenshots/frame hashes/assertions; headless (SDL offscreen) sandboxed runs with local screenshot baselines. Scripts: `boot_menu`, `smoke_newgame`, `overlays`, `quicksave`, `controls`, `controller`, `overlay_text` (`docs/REPLAY.md`).
+- **Unit Tests (`make test`)**: guest sync, guest memory & crash reports, x86 semantics (div/idiv, x87 vs hardware, flag-free helpers), input bindings, text wrap.
+- **`gl_renderer.c` Split**: 5,205 → 3,242 lines (`gl_shaders.c`, `gl_menu.c`, `gl_dialog_log.c`, private `gl_internal.h`); guest memory/heap moved from `cpu.c` to `guest_mem.c`.
+
+---
+
 ## [v5.3 — Engine Accuracy Overhaul, Split-Room & Filmstrip Fixes, Audit Hardening & Portable Builder] (2026-11-23)
 
 ### Core Engine, Widescreen UX & 4K Scene Accuracy (Post-`v5.2`)

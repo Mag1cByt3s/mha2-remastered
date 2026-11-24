@@ -100,6 +100,19 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
 - **Remastered FMV-Zwischensequenzen** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/upscale_videos.py](tools/upscale_videos.py)):
   - Echtzeit-GPU-Deblocking, Anti-Ringing und Schärfung für die 2005er Cinepak-AVIs sowie automatische lippensynchrone Wiedergabe optionaler HD-MP4/MKV-Cutscenes aus `hd_assets/videos/`.
 
+- **Schnellspeichern & -laden (`Strg+S` / `Strg+O`, Controller: Steuerkreuz ↑/↓)**:
+  - Steuert den originalen Speicherbildschirm des Spiels (originaler Speichercode, originale Vorschaubilder) in den festen Schnellspeicher-Slot 9; ein manueller Spielstand in Slot 9 wird nie überschrieben. Nur beim Erkunden eines Raums verfügbar (nicht in Zwischensequenzen, Dialogen oder Menüs).
+
+- **Frei belegbare Tasten & Controller (`F1` → `4. CONTROLS`) & Steam Deck** ([docs/STEAM_DECK.md](docs/STEAM_DECK.md)):
+  - Alle Remaster-Tastenkürzel mit je zwei Tastenkombinationen; Controller-Tasten über `pad_*` in `mha2_settings.ini`. Zusätzlich skalierbare Overlay-Texte (Dialogverlauf mit Zeilenumbruch, Hotspot-Beschriftungen, Hinweise; `100–200 %`).
+
+- **Behobene Fehler des Originalspiels & robuste Laufzeit**:
+  - Atomarer Ersatz für den in sieben `ObjMutex`-Methoden inline kopierten, nicht-atomaren Spinlock (inkl. erzwungenem Lock-Diebstahl), Absturz bei zufälliger Ambient-Variante ohne geladene Ressource (`0x0042a820`), Hotspot-Hervorhebung in 11 Raum- und 5 Minispiel-Unterklassen, korrekte x87-`FIST`/`#DE`-Semantik.
+  - Abstürze schreiben einen Bericht mit Gastadresse, Registern und Gast-Aufrufstapel nach `mha2_crash.log`; `--strict-mem` schützt die Gast-NULL-Seite zur Fehlersuche.
+
+- **Tests & Regressionen** ([docs/REPLAY.md](docs/REPLAY.md)):
+  - `make test` (Unit- & Stresstests) und `tools/regress.sh` (headless, in einer Sandbox ohne Zugriff auf echte Spielstände): skriptgesteuerte Eingabe-Wiedergabe (`--record` / `--replay`) durch Hauptmenü, Neues Spiel, Raumwechsel, Overlays, Schnellspeichern und Controller.
+
 <br>
 
 ---
@@ -152,8 +165,11 @@ Erstellt ein eigenständiges, distributionsübergreifendes `.tar.gz`-Bundle übe
 
 ```bash
 make lift
-bash tools/package_portable_linux.sh
+bash tools/package_portable_linux.sh            # Komplettpaket (persönliche Nutzung)
+bash tools/package_portable_linux.sh --split    # kleines Runtime-Paket + separates HD-Asset-Paket, ohne Spieldateien
 ```
+
+Installation des geteilten Releases (eigene Spieldateien, gemeinsames Datenverzeichnis `~/.local/share/mha2-remastered/`): [docs/INSTALL.md](docs/INSTALL.md).
 
 <br>
 
@@ -188,6 +204,8 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ./play.sh --fullscreen --hud                    # Rahmenloser Vollbildmodus + Live-HUD
 ./play.sh --aspect 16:10 --grade remastered     # 16:10-Smart-Widescreen & Color Grading erzwingen
 ./play.sh --16bit --no-hd-assets --no-hd-sprites --no-hd-text --no-bloom --grade original  # Purer 2005er-Look
+./play.sh --record sitzung.rec                  # Eingaben aufzeichnen; --replay sitzung.rec spielt sie ab
+./play.sh --strict-mem                          # Debug: Gast-NULL-Zeiger-Zugriffe sofort melden
 ```
 
 <br>
@@ -196,7 +214,7 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 
 | Taste | Aktion |
 |---|---|
-| **F1** | Interaktives 3-Tab-Display-, Post-FX- & Audio-Menü öffnen/schließen |
+| **F1** | Einstellungsmenü öffnen/schließen (Display, Post-FX, Assets & Text, Steuerung) |
 | **F2** | Live-Splitscreen-Vergleich Vorher/Nachher (2005 vs. 4K-Remaster) |
 | **F3** | Live-GPU-Statistik-HUD ein-/ausblenden |
 | **F4** | VSync / High-FPS-Modus durchschalten |
@@ -210,7 +228,11 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Strg+L** (`Ctrl+L`) | Dialog- & Hinweisverlauf öffnen/schließen |
 | **Umschalt** (`Shift`) | Gedrückt halten für 2× Schnelllauf-Geschwindigkeit |
 | **Strg+P** oder **Druck** | Sauberen 4K-PNG-Screenshot speichern (`screenshots/`) |
+| **Strg+S** / **Strg+O** | Schnellspeichern / Schnellladen (Slot 9) |
 | **ESC** | Zwischensequenzen überspringen / Spielmenü / F1-Menü schließen |
+| **Controller** | Linker Stick = Cursor, A = Klick, B = Rechtsklick, X = Hotspots, Y/LB = Schnelllauf, Back = F1, Start = ESC, Steuerkreuz ↑/↓ = Schnellspeichern/-laden |
+
+Alle Remaster-Tastenkürzel sind unter `F1` → `4. CONTROLS` frei belegbar (Standardwerte oben).
 
 <br>
 
@@ -328,6 +350,19 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
 - **Remastered FMV Cutscenes** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/upscale_videos.py](tools/upscale_videos.py)):
   - Real-time GPU deblocking + anti-ringing + sharpening for 2005 Cinepak AVIs, plus automatic drop-in HD MP4/MKV cutscene playback from `hd_assets/videos/` in full audio sync.
 
+- **Quick Save & Quick Load (`Ctrl+S` / `Ctrl+O`, controller: D-pad Up/Down)**:
+  - Drives the game's own save screen (original save code, original thumbnails) into the dedicated quick slot 9; a manual save in slot 9 is never overwritten. Available while exploring a room (not during cutscenes, dialogs or menus).
+
+- **Rebindable Keys & Controller (`F1` → `4. CONTROLS`) & Steam Deck** ([docs/STEAM_DECK.md](docs/STEAM_DECK.md)):
+  - Every remaster hotkey takes two key chords; controller buttons via `pad_*` in `mha2_settings.ini`. Plus scalable overlay text (word-wrapped dialog log, hotspot labels, toasts; `100–200%`).
+
+- **Original-Game Bugfixes & a Hardened Runtime**:
+  - Atomic replacement for the non-atomic spinlock MSVC inlined into seven `ObjMutex` methods (including its forced lock-steal), a crash when a random ambient variant is picked before any resource is loaded (`0x0042a820`), hotspot highlighting in 11 room and 5 minigame subclasses, exact x87 `FIST` / `#DE` semantics.
+  - Crashes write a report with the guest address, registers and guest call stack to `mha2_crash.log`; `--strict-mem` protects the guest NULL page for debugging.
+
+- **Tests & Regressions** ([docs/REPLAY.md](docs/REPLAY.md)):
+  - `make test` (unit & stress tests) and `tools/regress.sh` (headless, sandboxed — real savegames are never touched): scripted input replay (`--record` / `--replay`) through the main menu, a new game, room transitions, overlays, quick save and controller input.
+
 <br>
 
 ---
@@ -380,8 +415,11 @@ To package a self-contained portable x86_64 `.tar.gz` bundle using the Ubuntu 22
 
 ```bash
 make lift
-bash tools/package_portable_linux.sh
+bash tools/package_portable_linux.sh            # all-in-one bundle (personal use)
+bash tools/package_portable_linux.sh --split    # small runtime archive + separate HD asset pack, no game files
 ```
+
+Installing the split release (your own game files, shared data directory `~/.local/share/mha2-remastered/`): [docs/INSTALL.md](docs/INSTALL.md).
 
 <br>
 
@@ -416,6 +454,8 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ./play.sh --fullscreen --hud                    # Borderless fullscreen + live HUD
 ./play.sh --aspect 16:10 --grade remastered     # Force 16:10 Smart widescreen & color grading
 ./play.sh --16bit --no-hd-assets --no-hd-sprites --no-hd-text --no-bloom --grade original  # Pure 2005 look
+./play.sh --record session.rec                  # record input; --replay session.rec plays it back
+./play.sh --strict-mem                          # debug: report guest NULL-pointer accesses immediately
 ```
 
 <br>
@@ -424,7 +464,7 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 
 | Key | Action |
 |---|---|
-| **F1** | Open/Close Interactive 3-Tab Display, Post-FX & Audio Settings Menu |
+| **F1** | Open/Close the settings menu (Display, Post-FX, Assets & Text, Controls) |
 | **F2** | Toggle Live Split-Screen Before / After Comparison (2005 vs 4K Remaster) |
 | **F3** | Toggle live GPU stats HUD |
 | **F4** | Cycle VSync / High-FPS mode |
@@ -438,7 +478,11 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Ctrl+L** | Open/Close Dialog & Clue History Log |
 | **Shift** | Hold for 2× fast-walk speed |
 | **Ctrl + P** or **PrintScreen** | Save clean 4K PNG screenshot (`screenshots/`) |
+| **Ctrl+S** / **Ctrl+O** | Quick save / quick load (slot 9) |
 | **ESC** | Skip cutscenes / open game menu / close F1 menu |
+| **Controller** | Left stick = cursor, A = click, B = right click, X = hotspots, Y/LB = fast walk, Back = F1, Start = ESC, D-pad Up/Down = quick save/load |
+
+Every remaster hotkey can be rebound under `F1` → `4. CONTROLS` (defaults above).
 
 <br>
 

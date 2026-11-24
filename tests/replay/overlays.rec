@@ -1,0 +1,40 @@
+# Renderer overlay regression test (see docs/REPLAY.md): F1 settings menu (3 tabs),
+# Ctrl+L dialog log with captured monologue lines, F2 split-screen, hotspot markers.
+# Navigation only - no setting is changed.
+#! threshold 06_hotspots 0.12   (hotspot markers pulse with wall-clock time)
+wait video 60
+1000 tap Escape
+wait menu 60
+1500 click 60 553
+wait room x/006 30
+1500 click 114 566
++2000 tap Escape
+wait room l/001 30
+3000 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++11000 expect hotspots 15
++0 move 400 120
++500 tap F1
++800 shotfull 01_f1_display
++0 tap Tab
++600 shotfull 02_f1_postfx
++0 tap Tab
++600 shotfull 03_f1_assets_text
++0 tap Escape
++600 key down Left Ctrl
++50 tap L
++100 key up Left Ctrl
++800 shotfull 04_dialog_log
++0 tap Escape
++600 tap F2
++400 move 300 300
++800 shotfull 05_f2_split
++0 tap F2
++800 key down Space
++700 shotfull 06_hotspots
++0 key up Space
++600 shotfull 07_clean
++500 quit

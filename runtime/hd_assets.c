@@ -574,6 +574,10 @@ static void *predec_worker_main(void *arg) {
     return NULL;
 }
 
+const char *hd_sprites_room_prefix(void) {
+    return g_spr_room_prefix;
+}
+
 void hd_sprites_set_room_prefix(const char *bg_rel_name) {
     char next_prefix[64] = "";
     if (bg_rel_name && bg_rel_name[0]) {

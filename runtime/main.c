@@ -2,6 +2,8 @@
 #define _GNU_SOURCE
 #endif
 #include "runtime.h"
+#include "input_replay.h"
+#include <sys/resource.h>
 #include "gl_renderer.h"
 #include "hd_assets.h"
 #include "imports.h"
@@ -18,6 +20,19 @@ void runtime_unpin_current_thread(void) {
     }
 }
 
+/* Shared data location for split runtime / asset-pack installs (docs/INSTALL.md):
+ * $XDG_DATA_HOME/mha2-remastered/<sub>, default ~/.local/share/mha2-remastered/<sub>.
+ * Used only when game_files/ or hd_assets/ are not next to the working directory. */
+static int xdg_data_path(const char *sub, char *buf, size_t cap) {
+    const char *xdg = getenv("XDG_DATA_HOME");
+    const char *home = getenv("HOME");
+    int n;
+    if (xdg && xdg[0]) n = snprintf(buf, cap, "%s/mha2-remastered/%s", xdg, sub);
+    else if (home && home[0]) n = snprintf(buf, cap, "%s/.local/share/mha2-remastered/%s", home, sub);
+    else return 0;
+    return n > 0 && (size_t)n < cap;
+}
+
 static int file_exists(const char *p) {
     struct stat st;
     return stat(p, &st) == 0;
@@ -27,7 +42,8 @@ static void print_help(const char *prog) {
     printf("Moorhuhn Adventure 2: Der Fluch des Goldes — Native Linux Remastered Engine\n");
     printf("Usage: %s [options]\n\n", prog);
     printf("Options:\n");
-    printf("  --game-dir <dir>         Directory containing mha2.dat / mha2.exe (default: game_files)\n");
+    printf("  --game-dir <dir>         Directory containing mha2.dat / mha2.exe (default: game_files,\n");
+    printf("                           else ~/.local/share/mha2-remastered/game_files)\n");
     printf("  -f, --fullscreen         Start in borderless fullscreen\n");
     printf("  --width <W> --height <H> Initial window size (default: 1280x800)\n");
     printf("  --aspect <mode>          Widescreen mode: auto (default), 16:10, 16:9, 4:3\n");
@@ -45,7 +61,11 @@ static void print_help(const char *prog) {
     printf("  --grade <mode>           Color grading: original, remastered (default), warm, daylight\n");
     printf("  --no-transitions         Disable smooth room crossfade transitions\n");
     printf("  --hud                    Show live performance/upscaler HUD on startup\n");
-    printf("  --debug                  Verbose Win32/DirectX logging\n\n");
+    printf("  --debug                  Verbose Win32/DirectX logging\n");
+    printf("  --strict-mem             Debug: fault on guest NULL-page access (0x0-0xFFFF)\n");
+    printf("  --record <file>          Record keyboard/mouse input to a replay script\n");
+    printf("  --replay <file>          Drive the game from a replay script (docs/REPLAY.md)\n");
+    printf("  --replay-out <dir>       Output directory for replay screenshots (default: screenshots/replay)\n\n");
     printf("In-Game Hotkeys:\n");
     printf("  F1                       Open/Close Interactive Graphics & Settings Menu\n");
     printf("  F2                       Toggle Split-Screen Before / After Comparison\n");
@@ -73,12 +93,32 @@ int main(int argc, char **argv) {
     CPU_SET(0, &mask);
     sched_setaffinity(0, sizeof(mask), &mask);
 
+    /* The guest main thread runs on the process stack; lifted guest calls nest as
+       native C calls, so allow it the same headroom as guest worker threads. */
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY &&
+        rl.rlim_cur < GUEST_HOST_THREAD_STACK) {
+        rl.rlim_cur = (rl.rlim_max == RLIM_INFINITY || rl.rlim_max >= GUEST_HOST_THREAD_STACK)
+                          ? GUEST_HOST_THREAD_STACK : rl.rlim_max;
+        setrlimit(RLIMIT_STACK, &rl);
+    }
+
     /* Load persistent user settings before applying CLI overrides */
     gl_config_load("mha2_settings.ini");
 
     const char *exe_override = NULL;
+    int strict_mem = 0;
+    const char *record_path = NULL, *replay_path = NULL, *replay_out = NULL;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--debug") == 0) {
+        if (strcmp(argv[i], "--strict-mem") == 0) {
+            strict_mem = 1;
+        } else if (strcmp(argv[i], "--record") == 0 && i + 1 < argc) {
+            record_path = argv[++i];
+        } else if (strcmp(argv[i], "--replay") == 0 && i + 1 < argc) {
+            replay_path = argv[++i];
+        } else if (strcmp(argv[i], "--replay-out") == 0 && i + 1 < argc) {
+            replay_out = argv[++i];
+        } else if (strcmp(argv[i], "--debug") == 0) {
             g_debug_log = 1;
         } else if (strcmp(argv[i], "--game-dir") == 0 && i + 1 < argc) {
             snprintf(g_game_dir, sizeof(g_game_dir), "%s", argv[++i]);
@@ -147,9 +187,17 @@ int main(int argc, char **argv) {
     }
 
     if (!file_exists(g_game_dir)) {
+        char xdg[1024];
         if (file_exists("mha2.dat")) {
             snprintf(g_game_dir, sizeof(g_game_dir), ".");
+        } else if (xdg_data_path("game_files", xdg, sizeof(xdg)) && file_exists(xdg)) {
+            snprintf(g_game_dir, sizeof(g_game_dir), "%s", xdg);
         }
+    }
+    if (!file_exists(g_cfg.hd_assets_dir)) {
+        char xdg[1024];
+        if (xdg_data_path("hd_assets", xdg, sizeof(g_cfg.hd_assets_dir)) && file_exists(xdg))
+            memcpy(g_cfg.hd_assets_dir, xdg, strlen(xdg) + 1); /* fits: length bounded above */
     }
 
     char exe_path[1280];
@@ -165,6 +213,10 @@ int main(int argc, char **argv) {
     }
 
     runtime_mem_init();
+    crash_handler_install();
+    if ((record_path || replay_path) && input_replay_init(record_path, replay_path, replay_out) != 0) {
+        return 2;
+    }
     if (runtime_load_pe(exe_path) != 0) {
         fprintf(stderr, "ERROR: failed to load PE data from '%s'\n", exe_path);
         return 1;
@@ -182,6 +234,13 @@ int main(int argc, char **argv) {
     memset(&main_ctx, 0, sizeof(main_ctx));
     main_ctx.thread_id = guest_alloc_thread_slot(&main_ctx.teb_addr, &main_ctx.esp);
     main_ctx.fpu_cw = 0x037Fu;
+    crash_handler_thread_init(&main_ctx);
+    if (strict_mem) {
+        if (runtime_mem_protect_null_page() == 0)
+            fprintf(stderr, "[MHA2] --strict-mem: guest NULL page 0x0-0x%X is protected\n", GUEST_NULL_GUARD_SIZE - 1u);
+        else
+            perror("[MHA2] --strict-mem: mprotect");
+    }
 
     fprintf(stderr, "[MHA2] Launching Remastered v5 Engine (%s, %s, %s, HD-Bg:%d, HD-Sprites:%d, game_dir='%s')...\n",
             g_cfg.truecolor_32bit ? "32-bit TrueColor" : "16-bit RGB565",
@@ -195,6 +254,7 @@ int main(int argc, char **argv) {
     dispatch_call(&main_ctx, MHA2_ENTRY_VA);
 
     gl_config_save("mha2_settings.ini");
+    input_replay_shutdown();
     win32_dsound_shutdown();
     gl_renderer_shutdown();
     hd_assets_shutdown();

@@ -1,0 +1,35 @@
+# Gameplay smoke test (see docs/REPLAY.md). Run via tools/regress.sh, which uses a
+# sandboxed --game-dir so no real savegames are touched.
+#
+# Boot -> skip intro -> main menu -> Spielen -> Neues Spiel -> skip story book ->
+# first room l/001 (monologue) -> hotspot highlighter -> exit "Tür" -> room l/005.
+#! threshold 03_l001_hotspots 0.12   (hotspot markers pulse with wall-clock time)
+wait video 60
+1000 tap Escape
+wait menu 60
+1500 expect menu
++0 shot 01_main_menu
++0 hash main_menu
++0 click 60 553
+wait room x/006 30
+1500 shot 02_chapter_select
++0 click 114 566
++2000 tap Escape
+wait room l/001 30
+3000 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++11000 expect hotspots 15
++0 move 400 120
++500 key down Space
++700 shotfull 03_l001_hotspots
++0 key up Space
++300 shot 04_l001
++0 clickspot Tür
+wait room l/005 30
+4000 expect room l/005
++0 shot 05_l005
++0 hotspots
++500 quit

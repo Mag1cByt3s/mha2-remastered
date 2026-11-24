@@ -1,0 +1,36 @@
+# Controller / Steam Deck path (default pad bindings): hold X = hotspots, Back = F1 menu,
+# B = close menu, D-pad Up = quick save, D-pad Down = quick load (back to l/001).
+#! threshold 01_pad_x_hotspots 0.12   (hotspot markers pulse with wall-clock time)
+wait video 60
+1000 tap Escape
+wait menu 60
+1500 quicksave
++300 quickload
++1500 expect menu
+1500 click 60 553
+wait room x/006 30
+1500 click 114 566
++2000 tap Escape
+wait room l/001 30
+500 quicksave
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++2500 click 400 300
++11000 expect hotspots 15
++0 pad x down
++700 shotfull 01_pad_x_hotspots
++0 pad x up
++400 padtap back
++800 shotfull 02_pad_back_menu
++0 padtap b
++600 padtap dpup
++4000 expect room l/001
++0 savecheck 9
++0 clickspot Tür
+wait room l/005 30
+3000 padtap dpdown
+wait room l/001 30
+3000 expect hotspots 15
++300 quit

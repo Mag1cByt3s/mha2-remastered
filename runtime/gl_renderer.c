@@ -4,6 +4,8 @@
 #include "runtime.h"
 #include "gl_renderer.h"
 #include "hd_assets.h"
+#include "gl_internal.h"
+#include "input_bindings.h"
 #include <SDL2/SDL_opengl.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/imgutils.h>
@@ -48,12 +50,13 @@ ModernConfig g_cfg = {
     .scene_transitions  = 1,
     .video_enhance      = 1,
     .display_index      = 0,
+    .overlay_text_scale = 100,
     .hd_assets_dir      = "hd_assets",
 };
 
 static char g_ini_path[512] = "mha2_settings.ini";
 
-static int clamp_i(int v, int lo, int hi) {
+int clamp_i(int v, int lo, int hi) {
     return (v < lo) ? lo : ((v > hi) ? hi : v);
 }
 
@@ -78,6 +81,7 @@ void gl_config_load(const char *path) {
         while (vl > 0 && (val[vl - 1] == '\n' || val[vl - 1] == '\r' || val[vl - 1] == ' ' || val[vl - 1] == '\t')) {
             val[--vl] = '\0';
         }
+        if (bindings_ini_parse(p, val)) continue;
         if (strcmp(p, "fullscreen") == 0) g_cfg.start_fullscreen = atoi(val) ? 1 : 0;
         else if (strcmp(p, "win_width") == 0) g_cfg.init_win_w = clamp_i(atoi(val), 640, 7680);
         else if (strcmp(p, "win_height") == 0) g_cfg.init_win_h = clamp_i(atoi(val), 450, 4320);
@@ -137,12 +141,12 @@ void gl_config_load(const char *path) {
         else if (strcmp(p, "vignette_level") == 0) g_cfg.vignette_level = clamp_i(atoi(val), 0, VIGNETTE_COUNT - 1);
         else if (strcmp(p, "scene_transitions") == 0) g_cfg.scene_transitions = atoi(val) ? 1 : 0;
         else if (strcmp(p, "video_enhance") == 0) g_cfg.video_enhance = atoi(val) ? 1 : 0;
+        else if (strcmp(p, "overlay_text_scale") == 0) g_cfg.overlay_text_scale = clamp_i(atoi(val), 100, 200);
         else if (strcmp(p, "display_index") == 0) g_cfg.display_index = clamp_i(atoi(val), 0, 15);
     }
     fclose(f);
 }
 
-static int g_fullscreen; /* forward decl for config save */
 
 void gl_config_save(const char *path) {
     const char *p = (path && path[0]) ? path : g_ini_path;
@@ -182,7 +186,9 @@ void gl_config_save(const char *path) {
     fprintf(f, "vignette_level=%d\n", g_cfg.vignette_level);
     fprintf(f, "scene_transitions=%d\n", g_cfg.scene_transitions);
     fprintf(f, "video_enhance=%d\n", g_cfg.video_enhance);
+    fprintf(f, "overlay_text_scale=%d\n", g_cfg.overlay_text_scale);
     fprintf(f, "display_index=%d\n", g_cfg.display_index);
+    bindings_ini_write(f);
     fclose(f);
 }
 
@@ -257,7 +263,7 @@ static pthread_t g_gl_thread;
 static int g_gl_thread_valid = 0;
 static int g_gl_active = 0;
 static int g_has_frame = 0;
-static int g_fullscreen = 0;
+int g_fullscreen = 0;
 static GLuint g_vao = 0;
 static GLuint g_prog_upscale = 0;
 static GLuint g_prog_sidebar = 0;
@@ -409,7 +415,7 @@ static int g_live_mouse_visible = 0;
 static int g_mouse_moved_since_draw = 0;
 
 /* OSD / HUD state */
-static TTF_Font *g_osd_font = NULL;
+TTF_Font *g_osd_font = NULL;
 static GLuint g_hud_tex = 0;
 static int g_hud_w = 0, g_hud_h = 0;
 static uint32_t g_hud_last_update = 0;
@@ -438,7 +444,7 @@ static uint64_t mono_ns(void) {
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-static const char *gl_aa_name(int mode) {
+const char *gl_aa_name(int mode) {
     switch (mode) {
         case AA_FXAA:  return "FXAA 3.11";
         case AA_SMAA:  return "SMAA 1x (Crisp)";
@@ -447,11 +453,11 @@ static const char *gl_aa_name(int mode) {
     }
 }
 
-static const char *gl_font_style_name(int style) {
+const char *gl_font_style_name(int style) {
     return (style == FONT_SERIF) ? "Adventure Serif" : "Clean Sans";
 }
 
-static const char *gl_reverb_name(int mode) {
+const char *gl_reverb_name(int mode) {
     switch (mode) {
         case REVERB_SUBTLE: return "Subtle Castle";
         case REVERB_RICH:   return "Rich Hall";
@@ -459,7 +465,7 @@ static const char *gl_reverb_name(int mode) {
     }
 }
 
-static const char *gl_audio_eq_name(int mode) {
+const char *gl_audio_eq_name(int mode) {
     switch (mode) {
         case EQ_WARM:   return "Warm Remaster";
         case EQ_STUDIO: return "Studio Crisp";
@@ -467,7 +473,7 @@ static const char *gl_audio_eq_name(int mode) {
     }
 }
 
-static const char *gl_speed_name(int sp) {
+const char *gl_speed_name(int sp) {
     switch (sp) {
         case SPEED_15X: return "1.5x Fast";
         case SPEED_2X:  return "2.0x Turbo";
@@ -480,7 +486,6 @@ static volatile int g_fast_walk_held = 0;
 static volatile int g_hotspot_active = 0;
 static int g_compare_split_on = 0;
 static volatile int g_screenshot_pending = 0;
-static void gl_dialog_log_draw(int draw_w, int draw_h);
 
 void gl_renderer_set_fast_walk(int active) {
     g_fast_walk_held = active ? 1 : 0;
@@ -508,8 +513,24 @@ void gl_renderer_toggle_compare_split(void) {
     gl_renderer_redraw_if_needed(1);
 }
 
+static char g_screenshot_path[512]; /* explicit target (replay `shot`), else timestamped */
+
+uint32_t gl_renderer_window_id(void) {
+    return g_sdl_window ? SDL_GetWindowID(g_sdl_window) : 0u;
+}
+
 void gl_renderer_request_screenshot(void) {
+    g_screenshot_path[0] = 0;
     g_screenshot_pending = 1;
+    gl_renderer_redraw_if_needed(1);
+}
+
+static volatile int g_screenshot_full_pending = 0;
+
+void gl_renderer_request_screenshot_to(const char *path, int full_frame) {
+    snprintf(g_screenshot_path, sizeof(g_screenshot_path), "%s", path ? path : "");
+    if (full_frame) g_screenshot_full_pending = 1;
+    else g_screenshot_pending = 1;
     gl_renderer_redraw_if_needed(1);
 }
 
@@ -527,14 +548,20 @@ static void save_clean_screenshot_png(int vx, int vy, int vw, int vh) {
     }
     free(raw);
 
-    mkdir("screenshots", 0755);
-    time_t now = time(NULL);
-    struct tm tm_now;
-    localtime_r(&now, &tm_now);
-    char fname[256];
-    snprintf(fname, sizeof(fname), "screenshots/mha2_%04d%02d%02d_%02d%02d%02d.png",
-             tm_now.tm_year + 1900, tm_now.tm_mon + 1, tm_now.tm_mday,
-             tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec);
+    char fname[512];
+    int explicit_path = g_screenshot_path[0] != 0;
+    if (explicit_path) {
+        snprintf(fname, sizeof(fname), "%s", g_screenshot_path);
+        g_screenshot_path[0] = 0;
+    } else {
+        mkdir("screenshots", 0755);
+        time_t now = time(NULL);
+        struct tm tm_now;
+        localtime_r(&now, &tm_now);
+        snprintf(fname, sizeof(fname), "screenshots/mha2_%04d%02d%02d_%02d%02d%02d.png",
+                 tm_now.tm_year + 1900, tm_now.tm_mon + 1, tm_now.tm_mday,
+                 tm_now.tm_hour, tm_now.tm_min, tm_now.tm_sec);
+    }
 
     const AVCodec *codec = avcodec_find_encoder(AV_CODEC_ID_PNG);
     AVCodecContext *ctx = codec ? avcodec_alloc_context3(codec) : NULL;
@@ -566,7 +593,10 @@ static void save_clean_screenshot_png(int vx, int vy, int vw, int vh) {
     avcodec_free_context(&ctx);
     free(flipped);
 
-    if (saved) {
+    if (explicit_path) {
+        /* replay capture: no toast, it would bleed into the next captured frame */
+        if (!saved) fprintf(stderr, "[GL] screenshot to '%s' failed\n", fname);
+    } else if (saved) {
         gl_renderer_show_toast("4K Screenshot saved: %s", fname);
     } else {
         gl_renderer_show_toast("Screenshot failed!");
@@ -634,1009 +664,6 @@ const char *gl_vignette_name(int mode) {
     }
 }
 
-/* ---- GLSL 330 Shaders (Upscaling + Native HD Background + Widescreen Compositor) ---- */
-static const char *VS_FULLSCREEN =
-    "#version 330 core\n"
-    "out vec2 vUV;\n"
-    "void main() {\n"
-    "  vec2 pos = vec2((gl_VertexID == 1) ? 3.0 : -1.0,\n"
-    "                  (gl_VertexID == 2) ? 3.0 : -1.0);\n"
-    "  vUV = vec2((pos.x + 1.0) * 0.5, 1.0 - (pos.y + 1.0) * 0.5);\n"
-    "  gl_Position = vec4(pos, 0.0, 1.0);\n"
-    "}\n";
-
-static const char *FS_SIDEBAR =
-    "#version 330 core\n"
-    "uniform sampler2D uTex;\n"
-    "in vec2 vUV;\n"
-    "out vec4 FragColor;\n"
-    "void main() {\n"
-    "  vec3 col = vec3(0.0);\n"
-    "  float wsum = 0.0;\n"
-    "  for (int y = -2; y <= 2; y++) {\n"
-    "    for (int x = -2; x <= 2; x++) {\n"
-    "      float w = exp(-0.18 * float(x*x + y*y));\n"
-    "      vec2 uv = clamp(vUV + vec2(float(x), float(y)) * vec2(0.018, 0.024), 0.01, 0.99);\n"
-    "      col += texture(uTex, uv).rgb * w;\n"
-    "      wsum += w;\n"
-    "    }\n"
-    "  }\n"
-    "  col /= wsum;\n"
-    "  vec2 d = vUV * 2.0 - 1.0;\n"
-    "  float vig = clamp(1.0 - 0.35 * dot(d, d), 0.35, 1.0);\n"
-    "  FragColor = vec4(col * 0.24 * vig, 1.0);\n"
-    "}\n";
-
-static const char *FS_UPSCALE =
-    "#version 330 core\n"
-    "uniform sampler2D uTex;\n"
-    "uniform sampler2D uBgOrigTex;\n"
-    "uniform sampler2D uBgHdTex;\n"
-    "uniform vec2 uSrcSize;\n"
-    "uniform vec2 uTexSize;\n"
-    "uniform vec2 uDstSize;\n"
-    "uniform vec4 uBgRect; /* x0, y0, w, h in uSrcSize pixels */\n"
-    "uniform int uMode;\n"
-    "uniform float uSharp;\n"
-    "uniform int uHasHdBg;\n"
-    "uniform int uUseHdCanvas;\n"
-    "uniform int uLayout; /* 0=4:3 (800x600), 1=16:10 (800x500), 2=16:9 (800x450) */\n"
-    "uniform int uDialogBar; /* 1 when multi-line dialog choices occupy y=500..599 */\n"
-    "in vec2 vUV;\n"
-    "out vec4 FragColor;\n"
-    "\n"
-    "vec3 sampleTex(vec2 uv) {\n"
-    "  return texture(uTex, clamp(uv, vec2(0.5)/uTexSize, vec2(1.0) - vec2(0.5)/uTexSize)).rgb;\n"
-    "}\n"
-    "\n"
-    "vec4 catmullWeights(float f) {\n"
-    "  float f2 = f * f;\n"
-    "  float f3 = f2 * f;\n"
-    "  return 0.5 * vec4(\n"
-    "    -f + 2.0*f2 - f3,\n"
-    "    2.0 - 5.0*f2 + 3.0*f3,\n"
-    "    f + 4.0*f2 - 3.0*f3,\n"
-    "    -f2 + f3\n"
-    "  );\n"
-    "}\n"
-    "\n"
-    "vec3 sampleBicubic(vec2 uv) {\n"
-    "  vec2 p = uv * uSrcSize - 0.5;\n"
-    "  vec2 f = fract(p);\n"
-    "  vec2 base = (floor(p) + 0.5) / uSrcSize;\n"
-    "  vec2 inv = 1.0 / uSrcSize;\n"
-    "  vec4 wx = catmullWeights(f.x);\n"
-    "  vec4 wy = catmullWeights(f.y);\n"
-    "  vec3 col = vec3(0.0);\n"
-    "  for (int y = -1; y <= 2; y++) {\n"
-    "    vec3 row = vec3(0.0);\n"
-    "    for (int x = -1; x <= 2; x++) {\n"
-    "      row += sampleTex(base + vec2(float(x), float(y)) * inv) * wx[x + 1];\n"
-    "    }\n"
-    "    col += row * wy[y + 1];\n"
-    "  }\n"
-    "  return clamp(col, 0.0, 1.0);\n"
-    "}\n"
-    "\n"
-    "float sinc(float x) {\n"
-    "  if (abs(x) < 1e-5) return 1.0;\n"
-    "  float px = 3.14159265 * x;\n"
-    "  return sin(px) / px;\n"
-    "}\n"
-    "float lanczos3(float x) {\n"
-    "  if (abs(x) >= 3.0) return 0.0;\n"
-    "  return sinc(x) * sinc(x / 3.0);\n"
-    "}\n"
-    "vec3 sampleLanczos3(vec2 uv) {\n"
-    "  vec2 p = uv * uSrcSize - 0.5;\n"
-    "  vec2 f = fract(p);\n"
-    "  vec2 base = (floor(p) + 0.5) / uSrcSize;\n"
-    "  vec2 inv = 1.0 / uSrcSize;\n"
-    "  float wx[6]; float wy[6];\n"
-    "  float sx = 0.0, sy = 0.0;\n"
-    "  for (int i = 0; i < 6; i++) {\n"
-    "    wx[i] = lanczos3(float(i - 2) - f.x); sx += wx[i];\n"
-    "    wy[i] = lanczos3(float(i - 2) - f.y); sy += wy[i];\n"
-    "  }\n"
-    "  vec3 col = vec3(0.0);\n"
-    "  for (int y = 0; y < 6; y++) {\n"
-    "    vec3 row = vec3(0.0);\n"
-    "    for (int x = 0; x < 6; x++) {\n"
-    "      row += sampleTex(base + vec2(float(x - 2), float(y - 2)) * inv) * wx[x];\n"
-    "    }\n"
-    "    col += row * wy[y];\n"
-    "  }\n"
-    "  return clamp(col / (sx * sy), 0.0, 1.0);\n"
-    "}\n"
-    "\n"
-    "/* AMD FidelityFX-style Contrast Adaptive Sharpening (CAS) */\n"
-    "vec3 applyCAS(vec3 c, vec2 uv, float sharpness) {\n"
-    "  vec2 inv = 1.0 / uSrcSize;\n"
-    "  vec3 n = sampleTex(uv + vec2(0.0, -inv.y));\n"
-    "  vec3 s = sampleTex(uv + vec2(0.0,  inv.y));\n"
-    "  vec3 w = sampleTex(uv + vec2(-inv.x, 0.0));\n"
-    "  vec3 e = sampleTex(uv + vec2( inv.x, 0.0));\n"
-    "  vec3 mn = min(c, min(min(n, s), min(w, e)));\n"
-    "  vec3 mx = max(c, max(max(n, s), max(w, e)));\n"
-    "  vec3 amp = clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0);\n"
-    "  amp = sqrt(amp);\n"
-    "  float peak = -1.0 / mix(8.0, 5.0, sharpness);\n"
-    "  vec3 wt = amp * peak;\n"
-    "  vec3 outc = (c + (n + s + w + e) * wt) / (1.0 + 4.0 * wt);\n"
-    "  return clamp(outc, 0.0, 1.0);\n"
-    "}\n"
-    "\n"
-    "/* 4x4 Catmull-Rom supersampling + native-res FidelityFX CAS for 4K canvas */\n"
-    "vec3 sampleHdCanvas(vec2 uv) {\n"
-    "  vec2 p = uv * uTexSize - 0.5;\n"
-    "  vec2 f = fract(p);\n"
-    "  vec2 base = (floor(p) + 0.5) / uTexSize;\n"
-    "  vec2 inv = 1.0 / uTexSize;\n"
-    "  vec4 wx = catmullWeights(f.x);\n"
-    "  vec4 wy = catmullWeights(f.y);\n"
-    "  vec3 col = vec3(0.0);\n"
-    "  for (int y = -1; y <= 2; y++) {\n"
-    "    vec3 row = vec3(0.0);\n"
-    "    for (int x = -1; x <= 2; x++) {\n"
-    "      row += sampleTex(base + vec2(float(x), float(y)) * inv) * wx[x + 1];\n"
-    "    }\n"
-    "    col += row * wy[y + 1];\n"
-    "  }\n"
-    "  return clamp(col, 0.0, 1.0);\n"
-    "}\n"
-    "\n"
-    "vec3 applyCASNative(vec3 c, vec2 uv, vec2 dispStep, float sharpness) {\n"
-    "  vec3 n1 = sampleTex(uv + vec2(0.0, -dispStep.y));\n"
-    "  vec3 s1 = sampleTex(uv + vec2(0.0,  dispStep.y));\n"
-    "  vec3 w1 = sampleTex(uv + vec2(-dispStep.x, 0.0));\n"
-    "  vec3 e1 = sampleTex(uv + vec2( dispStep.x, 0.0));\n"
-    "  vec2 s2step = dispStep * 2.0;\n"
-    "  vec3 n2 = sampleTex(uv + vec2(0.0, -s2step.y));\n"
-    "  vec3 s2 = sampleTex(uv + vec2(0.0,  s2step.y));\n"
-    "  vec3 w2 = sampleTex(uv + vec2(-s2step.x, 0.0));\n"
-    "  vec3 e2 = sampleTex(uv + vec2( s2step.x, 0.0));\n"
-    "  vec3 mn = min(c, min(min(n1, s1), min(w1, e1)));\n"
-    "  vec3 mx = max(c, max(max(n1, s1), max(w1, e1)));\n"
-    "  vec3 amp = clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0);\n"
-    "  amp = sqrt(amp);\n"
-    "  vec3 d1 = c - 0.25 * (n1 + s1 + w1 + e1);\n"
-    "  vec3 d2 = c - 0.25 * (n2 + s2 + w2 + e2);\n"
-    "  vec3 outc = c + (d1 * 1.8 + d2 * 1.5) * (amp * clamp(sharpness, 0.0, 1.0));\n"
-    "  return clamp(outc, 0.0, 1.0);\n"
-    "}\n"
-    "\n"
-    "/* Edge-directed smooth upscaler for 2D sprites & hand-painted art */\n"
-    "vec3 sampleEdgeSmooth(vec2 uv) {\n"
-    "  vec2 inv = 1.0 / uSrcSize;\n"
-    "  vec3 c  = sampleBicubic(uv);\n"
-    "  vec3 nw = sampleTex(uv + vec2(-inv.x, -inv.y));\n"
-    "  vec3 ne = sampleTex(uv + vec2( inv.x, -inv.y));\n"
-    "  vec3 sw = sampleTex(uv + vec2(-inv.x,  inv.y));\n"
-    "  vec3 se = sampleTex(uv + vec2( inv.x,  inv.y));\n"
-    "  float d1 = length(nw - se);\n"
-    "  float d2 = length(ne - sw);\n"
-    "  float w = clamp(abs(d1 - d2) * 2.5, 0.0, 0.45);\n"
-    "  vec3 diag = (d1 < d2) ? 0.5 * (nw + se) : 0.5 * (ne + sw);\n"
-    "  vec3 blended = mix(c, diag, w * 0.55);\n"
-    "  return applyCAS(blended, uv, uSharp * 0.85);\n"
-    "}\n"
-    "\n"
-    "/* AMD FidelityFX FSR 1.0 — EASU (12-tap Edge-Adaptive Spatial Upsampling) */\n"
-    "float fsrLuma(vec3 c) { return c.b * 0.5 + (c.r * 0.5 + c.g); }\n"
-    "\n"
-    "void fsrEasuSet(inout vec2 dir, inout float len, float w,\n"
-    "                float lA, float lB, float lC, float lD, float lE) {\n"
-    "  float lenX = max(abs(lD - lC), abs(lC - lB));\n"
-    "  float dirX = lD - lB;\n"
-    "  dir.x += dirX * w;\n"
-    "  lenX = clamp(abs(dirX) / max(lenX, 1e-4), 0.0, 1.0);\n"
-    "  lenX *= lenX;\n"
-    "  len += lenX * w;\n"
-    "  float lenY = max(abs(lE - lC), abs(lC - lA));\n"
-    "  float dirY = lE - lA;\n"
-    "  dir.y += dirY * w;\n"
-    "  lenY = clamp(abs(dirY) / max(lenY, 1e-4), 0.0, 1.0);\n"
-    "  lenY *= lenY;\n"
-    "  len += lenY * w;\n"
-    "}\n"
-    "\n"
-    "void fsrEasuTap(inout vec3 aC, inout float aW, vec2 off, vec2 dir,\n"
-    "                vec2 len2, float lob, float clp, vec3 c) {\n"
-    "  vec2 v = vec2(off.x * dir.x + off.y * dir.y,\n"
-    "                off.x * (-dir.y) + off.y * dir.x);\n"
-    "  v *= len2;\n"
-    "  float d2 = min(dot(v, v), clp);\n"
-    "  float wB = 0.4 * d2 - 1.0;\n"
-    "  float wA = lob * d2 - 1.0;\n"
-    "  wB *= wB; wA *= wA;\n"
-    "  wB = 1.5625 * wB - 0.5625;\n"
-    "  float w = wB * wA;\n"
-    "  aC += c * w;\n"
-    "  aW += w;\n"
-    "}\n"
-    "\n"
-    "vec3 sampleFsrEasu(vec2 uv, vec2 texSize) {\n"
-    "  vec2 pp = uv * texSize - 0.5;\n"
-    "  vec2 fp = floor(pp);\n"
-    "  vec2 f  = pp - fp;\n"
-    "  vec2 inv = 1.0 / texSize;\n"
-    "  vec2 p0 = (fp + 0.5) * inv;\n"
-    "  /* 12-tap FSR 1.0 EASU footprint */\n"
-    "  vec3 b = sampleTex(p0 + vec2( 0.0, -1.0) * inv);\n"
-    "  vec3 c = sampleTex(p0 + vec2( 1.0, -1.0) * inv);\n"
-    "  vec3 e = sampleTex(p0 + vec2(-1.0,  0.0) * inv);\n"
-    "  vec3 f0 = sampleTex(p0);\n"
-    "  vec3 g = sampleTex(p0 + vec2( 1.0,  0.0) * inv);\n"
-    "  vec3 h = sampleTex(p0 + vec2( 2.0,  0.0) * inv);\n"
-    "  vec3 i = sampleTex(p0 + vec2(-1.0,  1.0) * inv);\n"
-    "  vec3 j = sampleTex(p0 + vec2( 0.0,  1.0) * inv);\n"
-    "  vec3 k = sampleTex(p0 + vec2( 1.0,  1.0) * inv);\n"
-    "  vec3 l = sampleTex(p0 + vec2( 2.0,  1.0) * inv);\n"
-    "  vec3 n = sampleTex(p0 + vec2( 0.0,  2.0) * inv);\n"
-    "  vec3 o = sampleTex(p0 + vec2( 1.0,  2.0) * inv);\n"
-    "  float bL = fsrLuma(b), cL = fsrLuma(c), eL = fsrLuma(e), fL = fsrLuma(f0);\n"
-    "  float gL = fsrLuma(g), hL = fsrLuma(h), iL = fsrLuma(i), jL = fsrLuma(j);\n"
-    "  float kL = fsrLuma(k), lL = fsrLuma(l), nL = fsrLuma(n), oL = fsrLuma(o);\n"
-    "  vec2 dir = vec2(0.0);\n"
-    "  float len = 0.0;\n"
-    "  fsrEasuSet(dir, len, (1.0 - f.x) * (1.0 - f.y), bL, eL, fL, gL, jL);\n"
-    "  fsrEasuSet(dir, len,        f.x  * (1.0 - f.y), cL, fL, gL, hL, kL);\n"
-    "  fsrEasuSet(dir, len, (1.0 - f.x) *        f.y , fL, iL, jL, kL, nL);\n"
-    "  fsrEasuSet(dir, len,        f.x  *        f.y , gL, jL, kL, lL, oL);\n"
-    "  float dirR = dot(dir, dir);\n"
-    "  if (dirR < 1.0 / 32768.0) {\n"
-    "    dir = vec2(1.0, 0.0);\n"
-    "  } else {\n"
-    "    dir *= inversesqrt(dirR);\n"
-    "  }\n"
-    "  len = len * 0.5;\n"
-    "  len *= len;\n"
-    "  float stretch = dot(dir, dir) / max(abs(dir.x), abs(dir.y));\n"
-    "  vec2 len2 = vec2(1.0 + (stretch - 1.0) * len, 1.0 - 0.5 * len);\n"
-    "  float lob = 0.5 - 0.29 * len;\n"
-    "  float clp = 1.0 / lob;\n"
-    "  vec3 min4 = min(min(f0, g), min(j, k));\n"
-    "  vec3 max4 = max(max(f0, g), max(j, k));\n"
-    "  vec3 aC = vec3(0.0);\n"
-    "  float aW = 0.0;\n"
-    "  fsrEasuTap(aC, aW, vec2( 0.0, -1.0) - f, dir, len2, lob, clp, b);\n"
-    "  fsrEasuTap(aC, aW, vec2( 1.0, -1.0) - f, dir, len2, lob, clp, c);\n"
-    "  fsrEasuTap(aC, aW, vec2(-1.0,  0.0) - f, dir, len2, lob, clp, e);\n"
-    "  fsrEasuTap(aC, aW, vec2( 0.0,  0.0) - f, dir, len2, lob, clp, f0);\n"
-    "  fsrEasuTap(aC, aW, vec2( 1.0,  0.0) - f, dir, len2, lob, clp, g);\n"
-    "  fsrEasuTap(aC, aW, vec2( 2.0,  0.0) - f, dir, len2, lob, clp, h);\n"
-    "  fsrEasuTap(aC, aW, vec2(-1.0,  1.0) - f, dir, len2, lob, clp, i);\n"
-    "  fsrEasuTap(aC, aW, vec2( 0.0,  1.0) - f, dir, len2, lob, clp, j);\n"
-    "  fsrEasuTap(aC, aW, vec2( 1.0,  1.0) - f, dir, len2, lob, clp, k);\n"
-    "  fsrEasuTap(aC, aW, vec2( 2.0,  1.0) - f, dir, len2, lob, clp, l);\n"
-    "  fsrEasuTap(aC, aW, vec2( 0.0,  2.0) - f, dir, len2, lob, clp, n);\n"
-    "  fsrEasuTap(aC, aW, vec2( 1.0,  2.0) - f, dir, len2, lob, clp, o);\n"
-    "  return clamp(aC / max(aW, 1e-4), min4, max4);\n"
-    "}\n"
-    "\n"
-    "/* AMD FidelityFX FSR 1.0 — Authentic per-channel RCAS + 2-scale display-pixel detail recovery */\n"
-    "vec3 applyFsrRcas(vec3 e, vec2 uv, vec2 stepUV, float sharpness) {\n"
-    "  vec3 b1 = sampleTex(uv + vec2(0.0, -stepUV.y));\n"
-    "  vec3 d1 = sampleTex(uv + vec2(-stepUV.x, 0.0));\n"
-    "  vec3 f1 = sampleTex(uv + vec2( stepUV.x, 0.0));\n"
-    "  vec3 h1 = sampleTex(uv + vec2(0.0,  stepUV.y));\n"
-    "  vec2 s2 = stepUV * 2.0;\n"
-    "  vec3 b2 = sampleTex(uv + vec2(0.0, -s2.y));\n"
-    "  vec3 d2 = sampleTex(uv + vec2(-s2.x, 0.0));\n"
-    "  vec3 f2 = sampleTex(uv + vec2( s2.x, 0.0));\n"
-    "  vec3 h2 = sampleTex(uv + vec2(0.0,  s2.y));\n"
-    "  float bL = fsrLuma(b1), dL = fsrLuma(d1), eL = fsrLuma(e), fL = fsrLuma(f1), hL = fsrLuma(h1);\n"
-    "  float nz = 0.25 * (bL + dL + fL + hL) - eL;\n"
-    "  float rangeL = max(max(max(bL, dL), max(eL, fL)), hL) -\n"
-    "                 min(min(min(bL, dL), min(eL, fL)), hL);\n"
-    "  nz = clamp(abs(nz) / max(rangeL, 1e-4), 0.0, 1.0);\n"
-    "  nz = -0.35 * nz + 1.0;\n"
-    "  vec3 mn4 = min(min(b1, d1), min(f1, h1));\n"
-    "  vec3 mx4 = max(max(b1, d1), max(f1, h1));\n"
-    "  vec3 hitMin = min(mn4, e) / max(4.0 * mx4, vec3(1e-4));\n"
-    "  vec3 hitMax = (1.0 - max(mx4, e)) / max(4.0 * (1.0 - mn4), vec3(1e-4));\n"
-    "  vec3 lobeRGB = max(-hitMin, -hitMax);\n"
-    "  float lobe = max(-0.22, min(lobeRGB.r, min(lobeRGB.g, lobeRGB.b))) * clamp(sharpness, 0.0, 1.0) * nz;\n"
-    "  vec3 rcas1 = (lobe * (b1 + d1 + f1 + h1) + e) / (4.0 * lobe + 1.0);\n"
-    "  vec3 amp = sqrt(clamp(min(min(mn4, e), 1.0 - max(mx4, e)) / max(max(mx4, e), vec3(1e-4)), 0.0, 1.0));\n"
-    "  vec3 detail2 = (e - 0.25 * (b2 + d2 + f2 + h2)) * (amp * clamp(sharpness, 0.0, 1.0) * nz * 1.65);\n"
-    "  vec3 outc = rcas1 + detail2;\n"
-    "  vec3 lo = min(mn4, e) - vec3(0.06);\n"
-    "  vec3 hi = max(mx4, e) + vec3(0.06);\n"
-    "  return clamp(outc, max(lo, vec3(0.0)), min(hi, vec3(1.0)));\n"
-    "}\n"
-    "\n"
-    "vec3 upscaleAt(vec2 uv) {\n"
-    "  if (uMode == 0) return applyCAS(sampleBicubic(uv), uv, uSharp);\n"
-    "  if (uMode == 1) return applyCAS(sampleLanczos3(uv), uv, uSharp * 0.55);\n"
-    "  if (uMode == 2) return sampleEdgeSmooth(uv);\n"
-    "  if (uMode == 3) return sampleTex(uv);\n"
-    "  if (uMode == 4) {\n"
-    "    vec2 p = (floor(uv * uSrcSize) + 0.5) / uSrcSize;\n"
-    "    return sampleTex(p);\n"
-    "  }\n"
-    "  if (uMode == 6) {\n"
-    "    vec3 easu = sampleFsrEasu(uv, uSrcSize);\n"
-    "    return (uSharp > 0.005) ? applyFsrRcas(easu, uv, 1.0 / uSrcSize, uSharp) : easu;\n"
-    "  }\n"
-    "  return applyCAS(sampleBicubic(uv), uv, 0.4);\n"
-    "}\n"
-    "\n"
-    "float bgDiffAt(vec2 texelPos) {\n"
-    "  vec2 rel = texelPos - uBgRect.xy;\n"
-    "  if (rel.x < 0.0 || rel.y < 0.0 || rel.x >= uBgRect.z || rel.y >= uBgRect.w) return 1.0;\n"
-    "  vec2 c  = (clamp(texelPos, vec2(0.0), uSrcSize - 1.0) + 0.5) / uSrcSize;\n"
-    "  vec2 bc = (clamp(rel, vec2(0.0), uBgRect.zw - 1.0) + 0.5) / uBgRect.zw;\n"
-    "  vec3 a = texture(uTex, c).rgb;\n"
-    "  vec3 b = texture(uBgOrigTex, bc).rgb;\n"
-    "  vec3 d = abs(a - b);\n"
-    "  return max(d.r, max(d.g, d.b));\n"
-    "}\n"
-    "\n"
-    "/* Strict exact-match background mask with pinhole protection */\n"
-    "float fgMaskAt(vec2 tp) {\n"
-    "  float dc = bgDiffAt(tp);\n"
-    "  float m  = smoothstep(0.002, 0.008, dc);\n"
-    "  if (m > 0.99) return 1.0;\n"
-    "  float n = step(0.006, bgDiffAt(tp + vec2( 0.0, -1.0)));\n"
-    "  float s = step(0.006, bgDiffAt(tp + vec2( 0.0,  1.0)));\n"
-    "  float w = step(0.006, bgDiffAt(tp + vec2(-1.0,  0.0)));\n"
-    "  float e = step(0.006, bgDiffAt(tp + vec2( 1.0,  0.0)));\n"
-    "  if (n + s + w + e >= 3.0) return 1.0;\n"
-    "  return m;\n"
-    "}\n"
-    "\n"
-    "/* Composite non-black HUD/subtitle pixels with subtle soft drop shadow */\n"
-    "vec3 overlayHudStrip(vec3 baseCol, vec2 hudPx, float minY, float maxY) {\n"
-    "  vec2 uv = hudPx / uSrcSize;\n"
-    "  vec3 hc = sampleTex(uv);\n"
-    "  float luma = max(hc.r, max(hc.g, hc.b));\n"
-    "  float a = smoothstep(0.025, 0.09, luma);\n"
-    "  float halo = 0.0;\n"
-    "  for (int oy = -2; oy <= 2; oy++) {\n"
-    "    for (int ox = -2; ox <= 2; ox++) {\n"
-    "      float sy = clamp(hudPx.y + float(oy), minY, maxY);\n"
-    "      vec3 sc = sampleTex(vec2(hudPx.x + float(ox), sy) / uSrcSize);\n"
-    "      halo = max(halo, max(sc.r, max(sc.g, sc.b)));\n"
-    "    }\n"
-    "  }\n"
-    "  float haloA = smoothstep(0.03, 0.14, halo) * 0.68;\n"
-    "  vec3 outc = mix(baseCol, vec3(0.02, 0.02, 0.04), haloA * (1.0 - a));\n"
-    "  return mix(outc, hc, a);\n"
-    "}\n"
-    "\n"
-    "void main() {\n"
-    "  vec2 dispSize = (uLayout == 1) ? vec2(800.0, 500.0) : ((uLayout == 2) ? vec2(800.0, 450.0) : uSrcSize);\n"
-    "  vec2 dispPos  = vUV * dispSize;\n"
-    "  vec2 srcPos;\n"
-    "  bool inRoom = true;\n"
-    "  bool inDock = false;\n"
-    "\n"
-    "  if (uDialogBar != 0 && uLayout != 0 && dispPos.y >= dispSize.y - 100.0) {\n"
-    "    inRoom = false;\n"
-    "    inDock = false;\n"
-    "    srcPos = vec2(dispPos.x, 500.0 + (dispPos.y - (dispSize.y - 100.0)));\n"
-    "  } else if (uLayout == 1) {\n"
-    "    if (dispPos.y < 450.0) {\n"
-    "      srcPos = vec2(dispPos.x, dispPos.y + 75.0);\n"
-    "    } else {\n"
-    "      inRoom = false;\n"
-    "      inDock = true;\n"
-    "      srcPos = vec2(dispPos.x, (dispPos.y - 450.0) + 537.0);\n"
-    "    }\n"
-    "  } else if (uLayout == 2) {\n"
-    "    srcPos = vec2(dispPos.x, dispPos.y + 75.0);\n"
-    "  } else {\n"
-    "    srcPos = dispPos;\n"
-    "  }\n"
-    "\n"
-    "  vec2 srcUV = srcPos / uSrcSize;\n"
-    "  vec3 col;\n"
-    "  if (uUseHdCanvas != 0) {\n"
-    "    /* 4K canvas sampling: true 12-tap directional FSR 1.0 EASU for FSR mode, Catmull-Rom otherwise */\n"
-    "    col = (uMode == 6) ? sampleFsrEasu(srcUV, uTexSize) : sampleHdCanvas(srcUV);\n"
-    "    if (uSharp > 0.005 && uMode != 3 && uMode != 4) {\n"
-    "      vec2 dispStep = (dispSize / max(uDstSize, vec2(1.0))) / uSrcSize;\n"
-    "      if (uMode == 6) {\n"
-    "        col = applyFsrRcas(col, srcUV, dispStep, uSharp);\n"
-    "      } else {\n"
-    "        col = applyCASNative(col, srcUV, dispStep, uSharp);\n"
-    "      }\n"
-    "    }\n"
-    "  } else {\n"
-    "    col = upscaleAt(srcUV);\n"
-    "    /* Seamless Native-Resolution HD Background Compositing (when HD Sprites is OFF) */\n"
-    "    if (uHasHdBg != 0 && inRoom &&\n"
-    "        srcPos.x >= uBgRect.x && srcPos.x < uBgRect.x + uBgRect.z &&\n"
-    "        srcPos.y >= uBgRect.y && srcPos.y < uBgRect.y + uBgRect.w) {\n"
-    "      vec2 fp = srcPos - 0.5;\n"
-    "      vec2 t0 = floor(fp);\n"
-    "      vec2 f  = fract(fp);\n"
-    "      float m00 = fgMaskAt(t0 + vec2(0.0, 0.0));\n"
-    "      float m10 = fgMaskAt(t0 + vec2(1.0, 0.0));\n"
-    "      float m01 = fgMaskAt(t0 + vec2(0.0, 1.0));\n"
-    "      float m11 = fgMaskAt(t0 + vec2(1.0, 1.0));\n"
-    "      float fgMask = mix(mix(m00, m10, f.x), mix(m01, m11, f.x), f.y);\n"
-    "      vec2 bgUV = clamp((srcPos - uBgRect.xy) / uBgRect.zw, 0.0, 1.0);\n"
-    "      vec3 hdCol = texture(uBgHdTex, bgUV).rgb;\n"
-    "      col = mix(hdCol, col, fgMask);\n"
-    "    }\n"
-    "  }\n"
-    "\n"
-    "  /* Subtle separator line above the 16:10 dedicated inventory dock */\n"
-    "  if (inDock && dispPos.y < 451.0) {\n"
-    "    col = mix(col, vec3(0.32, 0.26, 0.12), 0.75);\n"
-    "  }\n"
-    "\n"
-    "  /* Widescreen top bar overlay (subtitles, score, minigame Exit/Help buttons from y=0..74) */\n"
-    "  if (uLayout != 0 && dispPos.y < 75.0) {\n"
-    "    col = overlayHudStrip(col, vec2(dispPos.x, dispPos.y), 0.5, 74.5);\n"
-    "  }\n"
-    "\n"
-    "  /* 16:9 Cinema bottom inventory overlay (items & arrows from y=537..586) */\n"
-    "  if (uLayout == 2 && uDialogBar == 0 && dispPos.y >= 400.0) {\n"
-    "    vec2 invPx = vec2(dispPos.x, 537.0 + (dispPos.y - 400.0));\n"
-    "    col = overlayHudStrip(col, invPx, 537.5, 586.5);\n"
-    "  }\n"
-    "\n"
-    "  if (uMode == 5) {\n"
-    "    float scan = 0.90 + 0.10 * sin(vUV.y * dispSize.y * 3.14159265 * 2.0);\n"
-    "    vec2 d = vUV * 2.0 - 1.0;\n"
-    "    float vig = 1.0 - 0.14 * dot(d, d);\n"
-    "    col *= scan * vig;\n"
-    "  }\n"
-    "  FragColor = vec4(col, 1.0);\n"
-    "}\n";
-
-static const char *VS_OSD =
-    "#version 330 core\n"
-    "uniform vec4 uRect; /* x0, y0, x1, y1 in NDC */\n"
-    "uniform vec4 uUVRect; /* u0, v0, u1, v1 normalized */\n"
-    "out vec2 vUV;\n"
-    "void main() {\n"
-    "  vec2 corners[4] = vec2[4](vec2(0,0), vec2(1,0), vec2(0,1), vec2(1,1));\n"
-    "  vec2 c = corners[gl_VertexID];\n"
-    "  vUV = vec2(mix(uUVRect.x, uUVRect.z, c.x), mix(uUVRect.y, uUVRect.w, c.y));\n"
-    "  vec2 pos = vec2(mix(uRect.x, uRect.z, c.x), mix(uRect.y, uRect.w, c.y));\n"
-    "  gl_Position = vec4(pos, 0.0, 1.0);\n"
-    "}\n";
-
-static const char *FS_OSD =
-    "#version 330 core\n"
-    "uniform sampler2D uTex;\n"
-    "uniform float uAlpha;\n"
-    "uniform float uSoftEdge;\n"
-    "in vec2 vUV;\n"
-    "out vec4 FragColor;\n"
-    "void main() {\n"
-    "  vec4 t = texture(uTex, vUV);\n"
-    "  if (uSoftEdge > 0.5 && t.a > 0.004 && t.a < 0.992) {\n"
-    "    vec2 ts = 1.0 / vec2(textureSize(uTex, 0));\n"
-    "    vec4 nL = texture(uTex, vUV + vec2(-ts.x, 0.0));\n"
-    "    vec4 nR = texture(uTex, vUV + vec2( ts.x, 0.0));\n"
-    "    vec4 nU = texture(uTex, vUV + vec2(0.0, -ts.y));\n"
-    "    vec4 nD = texture(uTex, vUV + vec2(0.0,  ts.y));\n"
-    "    float aAvg = 0.50 * t.a + 0.125 * (nL.a + nR.a + nU.a + nD.a);\n"
-    "    t.a = mix(t.a, smoothstep(0.05, 0.95, aAvg), 0.72);\n"
-    "    /* Defringe dark cutout rims by lifting semi-transparent edge RGB toward opaque interior */\n"
-    "    float wL = smoothstep(0.55, 0.98, nL.a);\n"
-    "    float wR = smoothstep(0.55, 0.98, nR.a);\n"
-    "    float wU = smoothstep(0.55, 0.98, nU.a);\n"
-    "    float wD = smoothstep(0.55, 0.98, nD.a);\n"
-    "    float wSum = wL + wR + wU + wD;\n"
-    "    if (wSum > 0.01 && t.a < 0.88) {\n"
-    "      vec3 interior = (nL.rgb * wL + nR.rgb * wR + nU.rgb * wU + nD.rgb * wD) / wSum;\n"
-    "      float lift = (1.0 - t.a) * 0.65;\n"
-    "      t.rgb = mix(t.rgb, max(t.rgb, interior), lift);\n"
-    "    }\n"
-    "  }\n"
-    "  FragColor = vec4(t.rgb, t.a * uAlpha);\n"
-    "}\n";
-
-static const char *FS_SOLID =
-    "#version 330 core\n"
-    "uniform vec4 uColor;\n"
-    "out vec4 FragColor;\n"
-    "void main() {\n"
-    "  FragColor = uColor;\n"
-    "}\n";
-
-/* ---- v5 Bloom Bright-Pass Extract (warm-weighted for torches, candles, gold) ---- */
-static const char *FS_BLOOM_EXTRACT =
-    "#version 330 core\n"
-    "uniform sampler2D uScene;\n"
-    "uniform vec2 uTexelSize;\n"
-    "in vec2 vUV;\n"
-    "out vec4 FragColor;\n"
-    "void main() {\n"
-    "  vec2 uv = vec2(vUV.x, 1.0 - vUV.y);\n"
-    "  vec3 c = (texture(uScene, uv + uTexelSize * vec2(-0.5, -0.5)).rgb +\n"
-    "            texture(uScene, uv + uTexelSize * vec2( 0.5, -0.5)).rgb +\n"
-    "            texture(uScene, uv + uTexelSize * vec2(-0.5,  0.5)).rgb +\n"
-    "            texture(uScene, uv + uTexelSize * vec2( 0.5,  0.5)).rgb) * 0.25;\n"
-    "  float luma = dot(c, vec3(0.32, 0.56, 0.12));\n"
-    "  float warmth = max(0.0, (c.r * 0.65 + c.g * 0.35) - c.b);\n"
-    "  float bright = luma + warmth * 0.24;\n"
-    "  float thresh = 0.72;\n"
-    "  float knee = 0.14;\n"
-    "  float soft = clamp(bright - thresh + knee, 0.0, 2.0 * knee);\n"
-    "  soft = (soft * soft) / (4.0 * knee + 1e-4);\n"
-    "  float contrib = max(bright - thresh, soft) / max(bright, 1e-4);\n"
-    "  FragColor = vec4(c * clamp(contrib * 1.45, 0.0, 2.0), 1.0);\n"
-    "}\n";
-
-/* ---- v5 Separable 9-Tap Gaussian Blur for Bloom ---- */
-static const char *FS_BLOOM_BLUR =
-    "#version 330 core\n"
-    "uniform sampler2D uTex;\n"
-    "uniform vec2 uDir;\n"
-    "in vec2 vUV;\n"
-    "out vec4 FragColor;\n"
-    "void main() {\n"
-    "  vec2 uv = vec2(vUV.x, 1.0 - vUV.y);\n"
-    "  vec3 sum = texture(uTex, uv).rgb * 0.227027;\n"
-    "  sum += (texture(uTex, uv + uDir * 1.384615).rgb + texture(uTex, uv - uDir * 1.384615).rgb) * 0.316216;\n"
-    "  sum += (texture(uTex, uv + uDir * 3.230769).rgb + texture(uTex, uv - uDir * 3.230769).rgb) * 0.070270;\n"
-    "  FragColor = vec4(sum, 1.0);\n"
-    "}\n";
-
-/* ---- v5 Final Remaster Post-Processing Compositor ----
- * Combines: Scene Crossfade, Video Deblock+Sharpen, Sprite Silhouette AA,
- * Emissive Bloom, Color Grading/Vibrance, Vignette, and Anti-Banding Dithering. */
-static const char *FS_POST =
-    "#version 330 core\n"
-    "uniform sampler2D uScene;\n"
-    "uniform sampler2D uPrevScene;\n"
-    "uniform sampler2D uBloom;\n"
-    "uniform sampler2D uOrigTex;\n"
-    "uniform vec2 uInvSize;\n"
-    "uniform float uTransAlpha;\n"
-    "uniform float uBloomStrength;\n"
-    "uniform int uGradeMode;\n"
-    "uniform int uSilhouetteAA;\n"
-    "uniform float uAAStrength;\n"
-    "uniform float uClarity;\n"
-    "uniform float uFilmic;\n"
-    "uniform int uDeband;\n"
-    "uniform int uAtmosphere;\n"
-    "uniform float uTime;\n"
-    "uniform float uVignette;\n"
-    "uniform int uVideoEnhance;\n"
-    "uniform float uCompareSplit;\n"
-    "uniform int uLayout;\n"
-    "uniform int uDialogBar;\n"
-    "in vec2 vUV;\n"
-    "out vec4 FragColor;\n"
-    "\n"
-    "float luma3(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }\n"
-    "float max3(vec3 v) { return max(v.r, max(v.g, v.b)); }\n"
-    "\n"
-    "/* SMAA 1x color-aware edge detector with local contrast adaptation */\n"
-    "vec2 smaaEdgeAt(vec2 uv, float thr) {\n"
-    "  vec3 c  = texture(uScene, uv).rgb;\n"
-    "  vec3 cL = texture(uScene, uv + vec2(-uInvSize.x,  0.0)).rgb;\n"
-    "  vec3 cT = texture(uScene, uv + vec2( 0.0, -uInvSize.y)).rgb;\n"
-    "  vec3 cR = texture(uScene, uv + vec2( uInvSize.x,  0.0)).rgb;\n"
-    "  vec3 cB = texture(uScene, uv + vec2( 0.0,  uInvSize.y)).rgb;\n"
-    "  float dL = max3(abs(c - cL));\n"
-    "  float dT = max3(abs(c - cT));\n"
-    "  vec2 e = step(vec2(thr), vec2(dL, dT));\n"
-    "  if (e.x + e.y < 0.5) return vec2(0.0);\n"
-    "  float dR = max3(abs(c - cR));\n"
-    "  float dB = max3(abs(c - cB));\n"
-    "  float maxD = max(max(dL, dT), max(dR, dB));\n"
-    "  return e * step(vec2(maxD * 0.5), vec2(dL, dT));\n"
-    "}\n"
-    "\n"
-    "float smaaArea(float d1, float d2, float c1, float c2) {\n"
-    "  float len = max(d1 + d2, 1.0);\n"
-    "  if (c1 > 0.5 && c2 > 0.5) {\n"
-    "    /* Z-shape staircase: linear coverage ramp across span */\n"
-    "    float t = (d1 < d2) ? (0.5 - d1 / len) : (0.5 - d2 / len);\n"
-    "    return clamp(t, 0.0, 0.5);\n"
-    "  } else if (c1 > 0.5) {\n"
-    "    return clamp(0.5 - d1 / len, 0.0, 0.5);\n"
-    "  } else if (c2 > 0.5) {\n"
-    "    return clamp(0.5 - d2 / len, 0.0, 0.5);\n"
-    "  }\n"
-    "  return 0.0;\n"
-    "}\n"
-    "\n"
-    "vec3 applySmaa1x(vec3 c, vec2 uv, float strength) {\n"
-    "  float thr = mix(0.14, 0.045, strength);\n"
-    "  vec2 eC = smaaEdgeAt(uv, thr);\n"
-    "  vec2 eR = smaaEdgeAt(uv + vec2(uInvSize.x, 0.0), thr);\n"
-    "  vec2 eB = smaaEdgeAt(uv + vec2(0.0, uInvSize.y), thr);\n"
-    "  vec4 weights = vec4(0.0); /* top, bottom, left, right */\n"
-    "  /* Horizontal edge (top of pixel): search left/right up to 16px each */\n"
-    "  if (eC.y > 0.5) {\n"
-    "    float dL = 0.0, dR = 0.0;\n"
-    "    for (int i = 1; i <= 16; i++) {\n"
-    "      if (smaaEdgeAt(uv - vec2(float(i) * uInvSize.x, 0.0), thr).y < 0.5) break;\n"
-    "      dL = float(i);\n"
-    "    }\n"
-    "    for (int i = 1; i <= 16; i++) {\n"
-    "      if (smaaEdgeAt(uv + vec2(float(i) * uInvSize.x, 0.0), thr).y < 0.5) break;\n"
-    "      dR = float(i);\n"
-    "    }\n"
-    "    float cL = smaaEdgeAt(uv + vec2(-(dL + 1.0) * uInvSize.x, -uInvSize.y), thr).x;\n"
-    "    float cR = smaaEdgeAt(uv + vec2( (dR + 1.0) * uInvSize.x, -uInvSize.y), thr).x;\n"
-    "    float cLb = smaaEdgeAt(uv + vec2(-(dL + 1.0) * uInvSize.x, 0.0), thr).x;\n"
-    "    float cRb = smaaEdgeAt(uv + vec2( (dR + 1.0) * uInvSize.x, 0.0), thr).x;\n"
-    "    weights.x = smaaArea(dL, dR, max(cL, cLb), max(cR, cRb));\n"
-    "  }\n"
-    "  /* Bottom horizontal edge */\n"
-    "  if (eB.y > 0.5) {\n"
-    "    vec2 uvB = uv + vec2(0.0, uInvSize.y);\n"
-    "    float dL = 0.0, dR = 0.0;\n"
-    "    for (int i = 1; i <= 16; i++) {\n"
-    "      if (smaaEdgeAt(uvB - vec2(float(i) * uInvSize.x, 0.0), thr).y < 0.5) break;\n"
-    "      dL = float(i);\n"
-    "    }\n"
-    "    for (int i = 1; i <= 16; i++) {\n"
-    "      if (smaaEdgeAt(uvB + vec2(float(i) * uInvSize.x, 0.0), thr).y < 0.5) break;\n"
-    "      dR = float(i);\n"
-    "    }\n"
-    "    float cL = smaaEdgeAt(uvB + vec2(-(dL + 1.0) * uInvSize.x, -uInvSize.y), thr).x;\n"
-    "    float cR = smaaEdgeAt(uvB + vec2( (dR + 1.0) * uInvSize.x, -uInvSize.y), thr).x;\n"
-    "    weights.y = smaaArea(dL, dR, cL, cR);\n"
-    "  }\n"
-    "  /* Vertical edge (left of pixel): search up/down up to 16px each */\n"
-    "  if (eC.x > 0.5) {\n"
-    "    float dU = 0.0, dD = 0.0;\n"
-    "    for (int i = 1; i <= 16; i++) {\n"
-    "      if (smaaEdgeAt(uv - vec2(0.0, float(i) * uInvSize.y), thr).x < 0.5) break;\n"
-    "      dU = float(i);\n"
-    "    }\n"
-    "    for (int i = 1; i <= 16; i++) {\n"
-    "      if (smaaEdgeAt(uv + vec2(0.0, float(i) * uInvSize.y), thr).x < 0.5) break;\n"
-    "      dD = float(i);\n"
-    "    }\n"
-    "    float cU = smaaEdgeAt(uv + vec2(-uInvSize.x, -(dU + 1.0) * uInvSize.y), thr).y;\n"
-    "    float cD = smaaEdgeAt(uv + vec2(-uInvSize.x,  (dD + 1.0) * uInvSize.y), thr).y;\n"
-    "    float cUr = smaaEdgeAt(uv + vec2(0.0, -(dU + 1.0) * uInvSize.y), thr).y;\n"
-    "    float cDr = smaaEdgeAt(uv + vec2(0.0,  (dD + 1.0) * uInvSize.y), thr).y;\n"
-    "    weights.z = smaaArea(dU, dD, max(cU, cUr), max(cD, cDr));\n"
-    "  }\n"
-    "  /* Right vertical edge */\n"
-    "  if (eR.x > 0.5) {\n"
-    "    vec2 uvR = uv + vec2(uInvSize.x, 0.0);\n"
-    "    float dU = 0.0, dD = 0.0;\n"
-    "    for (int i = 1; i <= 16; i++) {\n"
-    "      if (smaaEdgeAt(uvR - vec2(0.0, float(i) * uInvSize.y), thr).x < 0.5) break;\n"
-    "      dU = float(i);\n"
-    "    }\n"
-    "    for (int i = 1; i <= 16; i++) {\n"
-    "      if (smaaEdgeAt(uvR + vec2(0.0, float(i) * uInvSize.y), thr).x < 0.5) break;\n"
-    "      dD = float(i);\n"
-    "    }\n"
-    "    float cU = smaaEdgeAt(uvR + vec2(-uInvSize.x, -(dU + 1.0) * uInvSize.y), thr).y;\n"
-    "    float cD = smaaEdgeAt(uvR + vec2(-uInvSize.x,  (dD + 1.0) * uInvSize.y), thr).y;\n"
-    "    weights.w = smaaArea(dU, dD, cU, cD);\n"
-    "  }\n"
-    "  weights *= strength;\n"
-    "  float wSum = weights.x + weights.y + weights.z + weights.w;\n"
-    "  if (wSum < 1e-4) return c;\n"
-    "  vec3 colH = mix(c, texture(uScene, uv + vec2(0.0, (weights.y - weights.x) * uInvSize.y)).rgb,\n"
-    "                  clamp(weights.x + weights.y, 0.0, 1.0));\n"
-    "  vec3 colV = mix(c, texture(uScene, uv + vec2((weights.w - weights.z) * uInvSize.x, 0.0)).rgb,\n"
-    "                  clamp(weights.z + weights.w, 0.0, 1.0));\n"
-    "  float hW = weights.x + weights.y;\n"
-    "  float vW = weights.z + weights.w;\n"
-    "  return (colH * hW + colV * vW) / max(hW + vW, 1e-4);\n"
-    "}\n"
-    "\n"
-    "/* Game-pixel-scale (~3 display px) structure-tensor tangent AA for baked-in 2005 1x staircases */\n"
-    "vec3 applyEdgeGuided3xAA(vec3 c, vec2 uv, float strength) {\n"
-    "  vec2 s = uInvSize * 2.6;\n"
-    "  float lTL = luma3(texture(uScene, uv + vec2(-s.x, -s.y)).rgb);\n"
-    "  float lTC = luma3(texture(uScene, uv + vec2( 0.0, -s.y)).rgb);\n"
-    "  float lTR = luma3(texture(uScene, uv + vec2( s.x, -s.y)).rgb);\n"
-    "  float lML = luma3(texture(uScene, uv + vec2(-s.x,  0.0)).rgb);\n"
-    "  float lMR = luma3(texture(uScene, uv + vec2( s.x,  0.0)).rgb);\n"
-    "  float lBL = luma3(texture(uScene, uv + vec2(-s.x,  s.y)).rgb);\n"
-    "  float lBC = luma3(texture(uScene, uv + vec2( 0.0,  s.y)).rgb);\n"
-    "  float lBR = luma3(texture(uScene, uv + vec2( s.x,  s.y)).rgb);\n"
-    "  float gx = (lTR + 2.0 * lMR + lBR) - (lTL + 2.0 * lML + lBL);\n"
-    "  float gy = (lBL + 2.0 * lBC + lBR) - (lTL + 2.0 * lTC + lTR);\n"
-    "  float g2 = gx * gx + gy * gy;\n"
-    "  if (g2 < 0.012) return c;\n"
-    "  /* Local 2-scale coherence check: ignore isotropic texture/grain, target clean curved/diagonal edges */\n"
-    "  vec2 grad = vec2(gx, gy) * inversesqrt(g2);\n"
-    "  vec2 tang = vec2(-grad.y, grad.x);\n"
-    "  vec2 step1 = tang * uInvSize * 1.6;\n"
-    "  vec2 step2 = tang * uInvSize * 3.2;\n"
-    "  vec3 tP1 = texture(uScene, uv + step1).rgb;\n"
-    "  vec3 tM1 = texture(uScene, uv - step1).rgb;\n"
-    "  vec3 tP2 = texture(uScene, uv + step2).rgb;\n"
-    "  vec3 tM2 = texture(uScene, uv - step2).rgb;\n"
-    "  float wP1 = exp(-dot(tP1 - c, tP1 - c) * 18.0) * 0.28;\n"
-    "  float wM1 = exp(-dot(tM1 - c, tM1 - c) * 18.0) * 0.28;\n"
-    "  float wP2 = exp(-dot(tP2 - c, tP2 - c) * 24.0) * 0.14;\n"
-    "  float wM2 = exp(-dot(tM2 - c, tM2 - c) * 24.0) * 0.14;\n"
-    "  float wC  = 0.36;\n"
-    "  vec3 smoothCol = (c * wC + tP1 * wP1 + tM1 * wM1 + tP2 * wP2 + tM2 * wM2) /\n"
-    "                   (wC + wP1 + wM1 + wP2 + wM2);\n"
-    "  /* Gate by directional contrast vs tangent consistency */\n"
-    "  float edgeGate = smoothstep(0.012, 0.09, g2);\n"
-    "  return mix(c, smoothCol, edgeGate * clamp(strength, 0.0, 1.0) * 0.85);\n"
-    "}\n"
-    "\n"
-    "vec3 sampleSceneFX(vec2 uv) {\n"
-    "  vec3 c = texture(uScene, uv).rgb;\n"
-    "  if (uVideoEnhance != 0) {\n"
-    "    /* Multi-radius bilateral deblock + adaptive detail recovery for 2005 FMV cutscenes */\n"
-    "    vec3 sum = c * 0.28;\n"
-    "    float wsum = 0.28;\n"
-    "    vec2 offs[8] = vec2[8](\n"
-    "      vec2(-1.2, 0.0), vec2(1.2, 0.0), vec2(0.0, -1.2), vec2(0.0, 1.2),\n"
-    "      vec2(-2.4, -2.4), vec2(2.4, -2.4), vec2(-2.4, 2.4), vec2(2.4, 2.4));\n"
-    "    for (int i = 0; i < 8; i++) {\n"
-    "      vec3 s = texture(uScene, uv + offs[i] * uInvSize).rgb;\n"
-    "      float d = length(s - c);\n"
-    "      float w = exp(-d * d * 38.0) * (i < 4 ? 0.12 : 0.06);\n"
-    "      sum += s * w;\n"
-    "      wsum += w;\n"
-    "    }\n"
-    "    vec3 deb = sum / wsum;\n"
-    "    vec3 b1 = 0.25 * (texture(uScene, uv + vec2(-uInvSize.x, 0.0)).rgb +\n"
-    "                      texture(uScene, uv + vec2( uInvSize.x, 0.0)).rgb +\n"
-    "                      texture(uScene, uv + vec2(0.0, -uInvSize.y)).rgb +\n"
-    "                      texture(uScene, uv + vec2(0.0,  uInvSize.y)).rgb);\n"
-    "    vec3 b2 = 0.25 * (texture(uScene, uv + vec2(-2.0 * uInvSize.x, 0.0)).rgb +\n"
-    "                      texture(uScene, uv + vec2( 2.0 * uInvSize.x, 0.0)).rgb +\n"
-    "                      texture(uScene, uv + vec2(0.0, -2.0 * uInvSize.y)).rgb +\n"
-    "                      texture(uScene, uv + vec2(0.0,  2.0 * uInvSize.y)).rgb);\n"
-    "    c = clamp(deb + (deb - b1) * 0.45 + (deb - b2) * 0.25, 0.0, 1.0);\n"
-    "  } else if (uSilhouetteAA == 3 && uAAStrength > 0.005) {\n"
-    "    float aaS = clamp(uAAStrength, 0.0, 1.0);\n"
-    "    c = applySmaa1x(c, uv, aaS);\n"
-    "    c = applyEdgeGuided3xAA(c, uv, aaS);\n"
-    "  } else if (uSilhouetteAA == 2 && uAAStrength > 0.005) {\n"
-    "    c = applySmaa1x(c, uv, clamp(uAAStrength, 0.0, 1.0));\n"
-    "  } else if (uSilhouetteAA == 1 && uAAStrength > 0.005) {\n"
-    "    /* Full FXAA 3.11 Quality edge-tracing AA (with live uAAStrength 0..1 control) */\n"
-    "    float aaS = clamp(uAAStrength, 0.0, 1.0);\n"
-    "    float lM  = luma3(c);\n"
-    "    float lN  = luma3(texture(uScene, uv + vec2( 0.0, -uInvSize.y)).rgb);\n"
-    "    float lS  = luma3(texture(uScene, uv + vec2( 0.0,  uInvSize.y)).rgb);\n"
-    "    float lW  = luma3(texture(uScene, uv + vec2(-uInvSize.x,  0.0)).rgb);\n"
-    "    float lE  = luma3(texture(uScene, uv + vec2( uInvSize.x,  0.0)).rgb);\n"
-    "    float lMin = min(lM, min(min(lN, lS), min(lW, lE)));\n"
-    "    float lMax = max(lM, max(max(lN, lS), max(lW, lE)));\n"
-    "    float range = lMax - lMin;\n"
-    "    float edgeMin = mix(0.06, 0.022, aaS);\n"
-    "    float edgeRel = mix(0.15, 0.062, aaS);\n"
-    "    if (range >= max(edgeMin, lMax * edgeRel)) {\n"
-    "      float lNW = luma3(texture(uScene, uv + vec2(-uInvSize.x, -uInvSize.y)).rgb);\n"
-    "      float lNE = luma3(texture(uScene, uv + vec2( uInvSize.x, -uInvSize.y)).rgb);\n"
-    "      float lSW = luma3(texture(uScene, uv + vec2(-uInvSize.x,  uInvSize.y)).rgb);\n"
-    "      float lSE = luma3(texture(uScene, uv + vec2( uInvSize.x,  uInvSize.y)).rgb);\n"
-    "      float lNS = lN + lS;\n"
-    "      float lWE = lW + lE;\n"
-    "      float subpixRcp = 1.0 / range;\n"
-    "      float subpixA = 2.0 * (lNS + lWE) + (lNW + lNE + lSW + lSE);\n"
-    "      float subpixB = clamp(abs(subpixA * (1.0 / 12.0) - lM) * subpixRcp, 0.0, 1.0);\n"
-    "      float subpixC = (-2.0 * subpixB + 3.0) * subpixB * subpixB;\n"
-    "      float subpixOff = subpixC * subpixC * (0.85 * aaS);\n"
-    "      float edgeH = abs(-2.0 * lW + lNW + lSW) + abs(-2.0 * lM + lNS) * 2.0 + abs(-2.0 * lE + lNE + lSE);\n"
-    "      float edgeV = abs(-2.0 * lN + lNW + lNE) + abs(-2.0 * lM + lWE) * 2.0 + abs(-2.0 * lS + lSW + lSE);\n"
-    "      bool isHorz = (edgeH >= edgeV);\n"
-    "      float l1 = isHorz ? lN : lW;\n"
-    "      float l2 = isHorz ? lS : lE;\n"
-    "      float g1 = abs(l1 - lM);\n"
-    "      float g2 = abs(l2 - lM);\n"
-    "      bool is1Steep = (g1 >= g2);\n"
-    "      float gradScaled = 0.25 * max(g1, g2);\n"
-    "      float stepLen = isHorz ? uInvSize.y : uInvSize.x;\n"
-    "      float lLocalAvg;\n"
-    "      if (is1Steep) {\n"
-    "        stepLen = -stepLen;\n"
-    "        lLocalAvg = 0.5 * (l1 + lM);\n"
-    "      } else {\n"
-    "        lLocalAvg = 0.5 * (l2 + lM);\n"
-    "      }\n"
-    "      vec2 curUV = uv;\n"
-    "      if (isHorz) curUV.y += stepLen * 0.5; else curUV.x += stepLen * 0.5;\n"
-    "      vec2 off = isHorz ? vec2(uInvSize.x, 0.0) : vec2(0.0, uInvSize.y);\n"
-    "      vec2 uv1 = curUV - off;\n"
-    "      vec2 uv2 = curUV + off;\n"
-    "      float lEnd1 = luma3(texture(uScene, uv1).rgb) - lLocalAvg;\n"
-    "      float lEnd2 = luma3(texture(uScene, uv2).rgb) - lLocalAvg;\n"
-    "      bool done1 = abs(lEnd1) >= gradScaled;\n"
-    "      bool done2 = abs(lEnd2) >= gradScaled;\n"
-    "      if (!done1) uv1 -= off;\n"
-    "      if (!done2) uv2 += off;\n"
-    "      float steps[9] = float[9](1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 4.0, 8.0);\n"
-    "      for (int i = 0; i < 9; i++) {\n"
-    "        if (done1 && done2) break;\n"
-    "        if (!done1) {\n"
-    "          lEnd1 = luma3(texture(uScene, uv1).rgb) - lLocalAvg;\n"
-    "          done1 = abs(lEnd1) >= gradScaled;\n"
-    "        }\n"
-    "        if (!done2) {\n"
-    "          lEnd2 = luma3(texture(uScene, uv2).rgb) - lLocalAvg;\n"
-    "          done2 = abs(lEnd2) >= gradScaled;\n"
-    "        }\n"
-    "        if (!done1) uv1 -= off * steps[i];\n"
-    "        if (!done2) uv2 += off * steps[i];\n"
-    "      }\n"
-    "      float dist1 = isHorz ? (uv.x - uv1.x) : (uv.y - uv1.y);\n"
-    "      float dist2 = isHorz ? (uv2.x - uv.x) : (uv2.y - uv.y);\n"
-    "      bool isDir1 = (dist1 < dist2);\n"
-    "      float distMin = min(dist1, dist2);\n"
-    "      float spanLen = dist1 + dist2;\n"
-    "      float pixOff = -distMin / max(spanLen, 1e-5) + 0.5;\n"
-    "      bool isMLtAvg = (lM < lLocalAvg);\n"
-    "      bool goodSpan = ((isDir1 ? lEnd1 : lEnd2) < 0.0) != isMLtAvg;\n"
-    "      float finalOff = max(goodSpan ? pixOff : 0.0, subpixOff);\n"
-    "      vec2 aaUV = uv;\n"
-    "      if (isHorz) aaUV.y += finalOff * stepLen; else aaUV.x += finalOff * stepLen;\n"
-    "      c = mix(c, texture(uScene, aaUV).rgb, aaS);\n"
-    "    }\n"
-    "  }\n"
-    "  return c;\n"
-    "}\n"
-    "\n"
-    "vec3 applyColorGrade(vec3 c, int mode) {\n"
-    "  if (mode == 0) return c;\n"
-    "  float l = luma3(c);\n"
-    "  if (mode == 1) {\n"
-    "    /* Remastered Rich: shadow-safe S-curve + natural vibrance */\n"
-    "    float maxc = max(c.r, max(c.g, c.b));\n"
-    "    float minc = min(c.r, min(c.g, c.b));\n"
-    "    float sat = (maxc > 1e-4) ? ((maxc - minc) / maxc) : 0.0;\n"
-    "    float vib = 0.14 * (1.0 - sat * 0.7);\n"
-    "    c = mix(vec3(l), c, 1.0 + vib);\n"
-    "    vec3 sc = c * c * (3.0 - 2.0 * c);\n"
-    "    c = mix(c, sc, 0.16);\n"
-    "    c = pow(max(c, vec3(0.0)), vec3(0.97));\n"
-    "  } else if (mode == 2) {\n"
-    "    /* Cinematic Warm: golden torchlight highlights + deep cool shadows */\n"
-    "    vec3 shad = vec3(0.95, 0.98, 1.05);\n"
-    "    vec3 high = vec3(1.06, 1.01, 0.92);\n"
-    "    c *= mix(shad, high, smoothstep(0.12, 0.82, l));\n"
-    "    c = mix(vec3(l), c, 1.12);\n"
-    "    vec3 sc = c * c * (3.0 - 2.0 * c);\n"
-    "    c = mix(c, sc, 0.22);\n"
-    "  } else if (mode == 3) {\n"
-    "    /* Crisp Daylight: clean neutral-cool clarity */\n"
-    "    c *= vec3(0.98, 1.00, 1.04);\n"
-    "    c = mix(vec3(l), c, 1.08);\n"
-    "    c = pow(max(c, vec3(0.0)), vec3(0.95));\n"
-    "  }\n"
-    "  return clamp(c, 0.0, 1.0);\n"
-    "}\n"
-    "\n"
-    "/* Wide-radius midtone local contrast ('Clarity') for 3D depth on pre-rendered art */\n"
-    "vec3 applyClarity(vec3 c, vec2 uv, float strength) {\n"
-    "  vec2 s1 = uInvSize * 12.0;\n"
-    "  vec2 s2 = uInvSize * 26.0;\n"
-    "  vec3 blur = 0.125 * (\n"
-    "    texture(uScene, uv + vec2(-s1.x, -s1.y)).rgb + texture(uScene, uv + vec2(s1.x, -s1.y)).rgb +\n"
-    "    texture(uScene, uv + vec2(-s1.x,  s1.y)).rgb + texture(uScene, uv + vec2(s1.x,  s1.y)).rgb +\n"
-    "    texture(uScene, uv + vec2(-s2.x,   0.0)).rgb + texture(uScene, uv + vec2(s2.x,   0.0)).rgb +\n"
-    "    texture(uScene, uv + vec2(  0.0, -s2.y)).rgb + texture(uScene, uv + vec2( 0.0,  s2.y)).rgb);\n"
-    "  float l = luma3(c);\n"
-    "  float midMask = 0.25 + 0.75 * (4.0 * l * (1.0 - l));\n"
-    "  vec3 diff = clamp((c - blur) * (strength * 0.85), vec3(-0.11), vec3(0.11));\n"
-    "  return clamp(c + diff * midMask, 0.0, 1.0);\n"
-    "}\n"
-    "\n"
-    "/* ACES-inspired filmic HDR highlight roll-off (adjustable 0..100% strength) */\n"
-    "vec3 applyFilmicToneMap(vec3 c, float strength) {\n"
-    "  float s = clamp(strength, 0.0, 1.0);\n"
-    "  vec3 lin = pow(max(c, vec3(0.0)), vec3(2.2)) * mix(1.0, 1.32, s);\n"
-    "  vec3 num = lin * (2.51 * lin + 0.03);\n"
-    "  vec3 den = lin * (2.43 * lin + 0.59) + 0.14;\n"
-    "  vec3 mapped = clamp(num / den, 0.0, 1.0);\n"
-    "  return mix(c, pow(mapped, vec3(1.0 / 2.2)), s);\n"
-    "}\n"
-    "\n"
-    "/* Subtle procedural drifting warm dust motes for living room atmosphere */\n"
-    "float dustLayer(vec2 p, float t, float scale) {\n"
-    "  vec2 gp = p * scale + vec2(sin(t * 0.25 + p.y * 3.0) * 0.35, -t * 0.18);\n"
-    "  vec2 cell = floor(gp);\n"
-    "  vec2 f = fract(gp);\n"
-    "  float h1 = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);\n"
-    "  float h2 = fract(sin(dot(cell, vec2(269.5, 183.3))) * 43758.5453);\n"
-    "  float h3 = fract(sin(dot(cell, vec2(419.2, 371.9))) * 43758.5453);\n"
-    "  if (h3 < 0.84) return 0.0;\n"
-    "  vec2 center = vec2(0.2 + 0.6 * h1, 0.2 + 0.6 * h2);\n"
-    "  float d = length(f - center);\n"
-    "  float pulse = 0.45 + 0.55 * sin(t * (1.2 + h1 * 1.8) + h2 * 6.283);\n"
-    "  return smoothstep(0.085, 0.012, d) * pulse;\n"
-    "}\n"
-    "\n"
-    "void main() {\n"
-    "  vec2 uv = vec2(vUV.x, 1.0 - vUV.y);\n"
-    "  vec3 col = sampleSceneFX(uv);\n"
-    "  if (uDeband != 0) {\n"
-    "    /* Proper wide-radius mpv-style 2-ring jittered debanding (smooths real 12-35px 8-bit shadow/sky bands) */\n"
-    "    float h1 = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
-    "    float h2 = fract(52.9829189 * fract(dot(gl_FragCoord.xy + vec2(3.1, 7.7), vec2(0.06711056, 0.00583715))));\n"
-    "    float ang = h1 * 6.2831853;\n"
-    "    vec2 rot1 = vec2(cos(ang), sin(ang));\n"
-    "    vec2 rot2 = vec2(-rot1.y, rot1.x);\n"
-    "    float r1 = 7.0 + 7.0 * h2;\n"
-    "    float r2 = 18.0 + 14.0 * h1;\n"
-    "    vec3 avg1 = 0.25 * (\n"
-    "      texture(uScene, uv + rot1 * uInvSize * r1).rgb +\n"
-    "      texture(uScene, uv - rot1 * uInvSize * r1).rgb +\n"
-    "      texture(uScene, uv + rot2 * uInvSize * r1).rgb +\n"
-    "      texture(uScene, uv - rot2 * uInvSize * r1).rgb);\n"
-    "    vec3 avg2 = 0.25 * (\n"
-    "      texture(uScene, uv + (rot1 + rot2) * 0.7071 * uInvSize * r2).rgb +\n"
-    "      texture(uScene, uv - (rot1 + rot2) * 0.7071 * uInvSize * r2).rgb +\n"
-    "      texture(uScene, uv + (rot1 - rot2) * 0.7071 * uInvSize * r2).rgb +\n"
-    "      texture(uScene, uv - (rot1 - rot2) * 0.7071 * uInvSize * r2).rgb);\n"
-    "    float d1 = max3(abs(avg1 - col));\n"
-    "    float d2 = max3(abs(avg2 - col));\n"
-    "    /* Smoothly blend only where local gradient is flat (< 12/255), keeping all real edges untouched */\n"
-    "    float w1 = 1.0 - smoothstep(0.016, 0.048, d1);\n"
-    "    float w2 = 1.0 - smoothstep(0.012, 0.038, d2);\n"
-    "    col = mix(col, avg1, w1 * 0.65);\n"
-    "    col = mix(col, avg2, w2 * 0.45);\n"
-    "  }\n"
-    "  if (uClarity > 0.005) {\n"
-    "    col = applyClarity(col, uv, clamp(uClarity, 0.0, 1.0));\n"
-    "  }\n"
-    "  if (uTransAlpha < 0.999) {\n"
-    "    vec3 prev = texture(uPrevScene, uv).rgb;\n"
-    "    col = mix(prev, col, uTransAlpha);\n"
-    "  }\n"
-    "  vec3 blRaw = (uBloomStrength > 0.001 || uAtmosphere != 0) ? texture(uBloom, uv).rgb : vec3(0.0);\n"
-    "  if (uBloomStrength > 0.001) {\n"
-    "    float flick = (uAtmosphere != 0)\n"
-    "      ? (1.0 + 0.08 * sin(uTime * 7.3) + 0.05 * sin(uTime * 13.1 + 1.4) + 0.03 * sin(uTime * 21.7))\n"
-    "      : 1.0;\n"
-    "    vec3 bl = blRaw * (uBloomStrength * flick);\n"
-    "    col = 1.0 - (1.0 - col) * exp(-bl * 1.15);\n"
-    "  }\n"
-    "  if (uAtmosphere != 0) {\n"
-    "    /* Subtle warm drifting dust motes (attenuated in dark corners, gently lit near bloom) */\n"
-    "    float dm = dustLayer(vUV * vec2(1.6, 1.0), uTime, 9.0) * 0.65 +\n"
-    "               dustLayer(vUV * vec2(1.6, 1.0) + vec2(3.7, 1.9), uTime * 0.72, 15.0) * 0.45;\n"
-    "    float lightBoost = 0.28 + clamp(luma3(blRaw) * 2.5, 0.0, 0.85);\n"
-    "    float edgeFade = smoothstep(0.0, 0.12, vUV.y) * smoothstep(1.0, 0.85, vUV.y);\n"
-    "    col += vec3(1.0, 0.91, 0.72) * (dm * 0.075 * lightBoost * edgeFade);\n"
-    "  }\n"
-    "  col = applyColorGrade(col, uGradeMode);\n"
-    "  if (uFilmic > 0.005) {\n"
-    "    col = applyFilmicToneMap(col, uFilmic);\n"
-    "  }\n"
-    "  if (uVignette > 0.001) {\n"
-    "    vec2 d = (vUV - 0.5) * vec2(1.15, 1.0);\n"
-    "    float v = 1.0 - smoothstep(0.42, 0.95, length(d)) * uVignette;\n"
-    "    col *= v;\n"
-    "  }\n"
-    "  if (uDeband != 0) {\n"
-    "    /* Triangular-PDF interleaved gradient noise dithering */\n"
-    "    float n1 = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
-    "    float n2 = fract(52.9829189 * fract(dot(gl_FragCoord.xy + vec2(1.7, 2.3), vec2(0.06711056, 0.00583715))));\n"
-    "    col += (n1 + n2 - 1.0) * (0.75 / 255.0);\n"
-    "  }\n"
-    "  if (uCompareSplit > 0.01) {\n"
-    "    if (abs(vUV.x - uCompareSplit) < uInvSize.x * 1.5) {\n"
-    "      col = vec3(0.96, 0.82, 0.36);\n"
-    "    } else if (vUV.x < uCompareSplit) {\n"
-    "      vec2 dSize = (uLayout == 1) ? vec2(800.0, 500.0) : ((uLayout == 2) ? vec2(800.0, 450.0) : vec2(800.0, 600.0));\n"
-    "      vec2 dPos = vUV * dSize;\n"
-    "      vec2 oPos = dPos;\n"
-    "      if (uDialogBar != 0 && uLayout != 0 && dPos.y >= dSize.y - 100.0) {\n"
-    "        oPos.y = 500.0 + (dPos.y - (dSize.y - 100.0));\n"
-    "      } else if (uLayout == 1) {\n"
-    "        oPos.y = (dPos.y < 450.0) ? (dPos.y + 75.0) : ((dPos.y - 450.0) + 537.0);\n"
-    "      } else if (uLayout == 2) {\n"
-    "        oPos.y = dPos.y + 75.0;\n"
-    "      }\n"
-    "      vec2 oUV = clamp((floor(oPos) + 0.5) / vec2(800.0, 600.0), vec2(0.0), vec2(1.0));\n"
-    "      col = texture(uOrigTex, oUV).rgb;\n"
-    "    }\n"
-    "  }\n"
-    "  FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);\n"
-    "}\n";
-
 static GLuint compile_shader(GLenum type, const char *src) {
     GLuint s = p_glCreateShader(type);
     p_glShaderSource(s, 1, &src, NULL);
@@ -1675,7 +702,7 @@ static GLuint link_program(const char *vs_src, const char *fs_src) {
     return p;
 }
 
-static void apply_vsync_mode(void) {
+void apply_vsync_mode(void) {
     if (!g_gl_active) return;
     if (g_cfg.vsync_mode == VSYNC_ADAPTIVE) {
         if (SDL_GL_SetSwapInterval(-1) != 0) SDL_GL_SetSwapInterval(1);
@@ -1686,7 +713,7 @@ static void apply_vsync_mode(void) {
     }
 }
 
-static void init_osd_font(void) {
+void init_osd_font(void) {
     if (!g_ttf_font_path[0]) {
         const char *env = getenv("MHA2_FONT_PATH");
         const char *paths[] = {
@@ -1758,7 +785,7 @@ static void init_osd_font(void) {
     }
 }
 
-static TTF_Font *get_native_font(int px_size, int bold) {
+TTF_Font *get_native_font(int px_size, int bold) {
     if (px_size < 8) px_size = 8;
     if (px_size > 200) px_size = 200;
     for (int i = 0; i < MAX_FONT_CACHE; i++) {
@@ -1790,7 +817,7 @@ static TTF_Font *get_native_font(int px_size, int bold) {
     return f;
 }
 
-static void flush_canvas_text_cache(void) {
+void flush_canvas_text_cache(void) {
     for (int i = 0; i < MAX_CANVAS_TEXT_CACHE; i++) {
         if (g_canvas_text_cache[i].in_use && g_canvas_text_cache[i].tex) {
             glDeleteTextures(1, &g_canvas_text_cache[i].tex);
@@ -2008,7 +1035,12 @@ static TextTexEntry *get_or_render_text_tex(const GlTextDraw *td, int native_px)
 static GLuint render_pill_texture(const char *text, int *out_w, int *out_h) {
     if (!g_osd_font || !text || !text[0]) return 0;
     SDL_Color fg = { 245, 232, 185, 255 };
-    SDL_Surface *txt = TTF_RenderUTF8_Blended(g_osd_font, text, fg);
+    TTF_Font *font = g_osd_font;
+    if (g_cfg.overlay_text_scale > 100) {
+        TTF_Font *scaled = get_native_font((18 * g_cfg.overlay_text_scale) / 100, 0);
+        if (scaled) font = scaled;
+    }
+    SDL_Surface *txt = TTF_RenderUTF8_Blended(font, text, fg);
     if (!txt) return 0;
     int pad_x = 14, pad_y = 7;
     int tw = txt->w + pad_x * 2;
@@ -2315,12 +1347,6 @@ int gl_renderer_init(const char *title, int w, int h) {
     return 0;
 }
 
-/* ---- Interactive F1 Graphics & Settings Menu State (forward decl) ---- */
-static void gl_menu_mark_dirty(void);
-static void gl_menu_draw(int draw_w, int draw_h);
-static void gl_menu_shutdown(void);
-static int  gl_menu_needs_redraw(void);
-static void gl_dialog_log_shutdown(void);
 
 void gl_renderer_shutdown(void) {
     if (g_gl_active && g_gl_thread_valid && !pthread_equal(pthread_self(), g_gl_thread)) {
@@ -3597,7 +2623,7 @@ static void draw_osd_quad_f(GLuint tex, float x_px, float y_px, float w_px, floa
     draw_osd_quad_uv(tex, x_px, y_px, w_px, h_px, 0.0f, 0.0f, 1.0f, 1.0f, draw_w, draw_h, alpha);
 }
 
-static void draw_osd_quad(GLuint tex, int x_px, int y_px, int w_px, int h_px,
+void draw_osd_quad(GLuint tex, int x_px, int y_px, int w_px, int h_px,
                           int draw_w, int draw_h, float alpha) {
     draw_osd_quad_f(tex, (float)x_px, (float)y_px, (float)w_px, (float)h_px, draw_w, draw_h, alpha);
 }
@@ -3931,7 +2957,7 @@ static void gl_draw_frame_common(int src_w, int src_h, int src_bpp) {
     static int g_hotspot_logged_press = 0;
     if (!g_hotspot_active) {
         g_hotspot_logged_press = 0;
-    } else if (g_cfg.hotspot_hints && !is_video && !gl_menu_is_open()) {
+    } else if (g_cfg.hotspot_hints && !is_video && !gl_menu_is_open() && !g_bot_bar_dialog_mode) {
         GameHotspot hotspots[64];
         int hcount = game_collect_room_hotspots(hotspots, 64);
         if (g_debug_log && !g_hotspot_logged_press) {
@@ -3993,9 +3019,9 @@ static void gl_draw_frame_common(int src_w, int src_h, int src_bpp) {
             }
             glDisable(GL_BLEND);
 
-            int px_size = (int)(13.0f * sy + 0.5f);
+            int px_size = (int)(13.0f * sy * (float)g_cfg.overlay_text_scale / 100.0f + 0.5f);
             if (px_size < 14) px_size = 14;
-            if (px_size > 34) px_size = 34;
+            if (px_size > 68) px_size = 68;
             int outline = (px_size >= 22) ? 3 : 2;
             float vp_top = (float)(draw_h - vy - vh);
 
@@ -4107,6 +3133,12 @@ static void gl_draw_frame_common(int src_w, int src_h, int src_bpp) {
         gl_menu_draw(draw_w, draw_h);
     } else if (gl_renderer_is_dialog_log_open()) {
         gl_dialog_log_draw(draw_w, draw_h);
+    }
+
+    /* Full composited frame incl. overlays/HUD/menus (replay `shotfull`) */
+    if (g_screenshot_full_pending) {
+        g_screenshot_full_pending = 0;
+        save_clean_screenshot_png(0, 0, draw_w, draw_h);
     }
 
     g_mouse_moved_since_draw = 0;
@@ -4223,983 +3255,3 @@ void gl_renderer_present_rgb24(const uint8_t *rgb, int w, int h, int stride) {
     gl_draw_frame_common(w, h, 24);
 }
 
-/* ============================================================================
- * Interactive 2-Tab In-Game Graphics & Remaster FX Settings Menu (F1)
- * ============================================================================ */
-
-enum MenuRowId {
-    MROW_DISPLAY_MODE = 0,
-    MROW_DISPLAY_INDEX,
-    MROW_RESOLUTION,
-    MROW_ASPECT_MODE,
-    MROW_AMBIENT_BARS,
-    MROW_SHADER,
-    MROW_SHARPEN,
-    MROW_VSYNC,
-    MROW_FPS_CAP,
-    MROW_HUD,
-    MROW_GAME_SPEED,
-    MROW_SCREENSHOT,
-    /* Tab 2: Post-FX & Color */
-    MROW_BLOOM,
-    MROW_COLOR_GRADE,
-    MROW_SILHOUETTE_AA,
-    MROW_AA_STRENGTH,
-    MROW_CLARITY,
-    MROW_FILMIC,
-    MROW_DEBAND,
-    MROW_ATMOSPHERE,
-    MROW_VIGNETTE,
-    MROW_TRANSITIONS,
-    /* Tab 3: Assets, Typography & Audio */
-    MROW_HD_ASSETS,
-    MROW_HD_SPRITES,
-    MROW_HD_TEXT,
-    MROW_FONT_STYLE,
-    MROW_TEXT_BACKDROP,
-    MROW_DECOUPLED_CURSOR,
-    MROW_VIDEO_ENHANCE,
-    MROW_HOTSPOT_HINTS,
-    MROW_AUDIO_REVERB,
-    MROW_AUDIO_EQ,
-    MROW_VOLUME,
-    MROW_CLOSE,
-    MROW_COUNT
-};
-
-static const int g_tab0_rows[] = {
-    MROW_DISPLAY_MODE,
-    MROW_DISPLAY_INDEX,
-    MROW_RESOLUTION,
-    MROW_ASPECT_MODE,
-    MROW_AMBIENT_BARS,
-    MROW_SHADER,
-    MROW_SHARPEN,
-    MROW_VSYNC,
-    MROW_FPS_CAP,
-    MROW_HUD,
-    MROW_GAME_SPEED,
-    MROW_SCREENSHOT,
-    MROW_CLOSE
-};
-#define NUM_TAB0_ROWS ((int)(sizeof(g_tab0_rows) / sizeof(g_tab0_rows[0])))
-
-static const int g_tab1_rows[] = {
-    MROW_SILHOUETTE_AA,
-    MROW_AA_STRENGTH,
-    MROW_CLARITY,
-    MROW_FILMIC,
-    MROW_BLOOM,
-    MROW_COLOR_GRADE,
-    MROW_ATMOSPHERE,
-    MROW_DEBAND,
-    MROW_VIGNETTE,
-    MROW_TRANSITIONS,
-    MROW_CLOSE
-};
-#define NUM_TAB1_ROWS ((int)(sizeof(g_tab1_rows) / sizeof(g_tab1_rows[0])))
-
-static const int g_tab2_rows[] = {
-    MROW_HD_ASSETS,
-    MROW_HD_SPRITES,
-    MROW_HD_TEXT,
-    MROW_FONT_STYLE,
-    MROW_TEXT_BACKDROP,
-    MROW_DECOUPLED_CURSOR,
-    MROW_VIDEO_ENHANCE,
-    MROW_HOTSPOT_HINTS,
-    MROW_AUDIO_REVERB,
-    MROW_AUDIO_EQ,
-    MROW_VOLUME,
-    MROW_CLOSE
-};
-#define NUM_TAB2_ROWS ((int)(sizeof(g_tab2_rows) / sizeof(g_tab2_rows[0])))
-
-typedef struct ResPreset {
-    int w;
-    int h;
-    const char *label;
-} ResPreset;
-
-static const ResPreset g_res_presets[] = {
-    {  800,  600, "800x600 (4:3 Native)" },
-    { 1024,  768, "1024x768 (4:3)" },
-    { 1280,  720, "1280x720 (16:9)" },
-    { 1280,  800, "1280x800 (16:10)" },
-    { 1280,  960, "1280x960 (4:3)" },
-    { 1440,  900, "1440x900 (16:10)" },
-    { 1600, 1000, "1600x1000 (16:10)" },
-    { 1600, 1200, "1600x1200 (4:3)" },
-    { 1920, 1080, "1920x1080 (16:9)" },
-    { 1920, 1200, "1920x1200 (16:10)" },
-    { 2560, 1440, "2560x1440 (16:9)" },
-    { 2560, 1600, "2560x1600 (16:10)" },
-};
-#define NUM_RES_PRESETS ((int)(sizeof(g_res_presets) / sizeof(g_res_presets[0])))
-
-static const int g_fps_presets[] = { 60, 120, 144, 165, 240, 0 };
-#define NUM_FPS_PRESETS ((int)(sizeof(g_fps_presets) / sizeof(g_fps_presets[0])))
-
-static int    g_menu_open = 0;
-static int    g_menu_tab = 0;   /* 0 = Display & Scaling, 1 = Remaster FX & Assets */
-static int    g_menu_sel = 0;   /* index within active tab */
-static int    g_menu_dirty = 1;
-static GLuint g_menu_tex = 0;
-static int    g_menu_tex_w = 0, g_menu_tex_h = 0;
-static int    g_menu_last_draw_w = 0, g_menu_last_draw_h = 0;
-/* Cached menu panel rect in SDL window coordinates for mouse hit-testing */
-static float  g_menu_win_x = 0.0f, g_menu_win_y = 0.0f, g_menu_win_w = 0.0f, g_menu_win_h = 0.0f;
-static float  g_menu_tabs_top_frac = 0.10f;
-static float  g_menu_tabs_bot_frac = 0.17f;
-static float  g_menu_rows_top_frac = 0.19f;
-static float  g_menu_row_h_frac = 0.060f;
-
-static int menu_active_row_count(void) {
-    if (g_menu_tab == 0) return NUM_TAB0_ROWS;
-    if (g_menu_tab == 1) return NUM_TAB1_ROWS;
-    return NUM_TAB2_ROWS;
-}
-
-static int menu_active_row_id(int idx) {
-    if (g_menu_tab == 0) {
-        if (idx < 0 || idx >= NUM_TAB0_ROWS) return MROW_CLOSE;
-        return g_tab0_rows[idx];
-    }
-    if (g_menu_tab == 1) {
-        if (idx < 0 || idx >= NUM_TAB1_ROWS) return MROW_CLOSE;
-        return g_tab1_rows[idx];
-    }
-    if (idx < 0 || idx >= NUM_TAB2_ROWS) return MROW_CLOSE;
-    return g_tab2_rows[idx];
-}
-
-static void gl_menu_mark_dirty(void) {
-    g_menu_dirty = 1;
-}
-
-static int gl_menu_needs_redraw(void) {
-    return g_menu_open && g_menu_dirty;
-}
-
-static void gl_menu_shutdown(void) {
-    if (g_menu_tex) {
-        glDeleteTextures(1, &g_menu_tex);
-        g_menu_tex = 0;
-    }
-    g_menu_tex_w = g_menu_tex_h = 0;
-    g_menu_dirty = 1;
-}
-
-int gl_menu_is_open(void) {
-    return g_menu_open;
-}
-
-void gl_menu_toggle(void) {
-    g_menu_open = !g_menu_open;
-    g_menu_dirty = 1;
-    if (g_menu_open) {
-        SDL_ShowCursor(SDL_ENABLE);
-    } else {
-        SDL_ShowCursor(g_os_cursor_hidden ? SDL_DISABLE : SDL_ENABLE);
-    }
-    gl_renderer_redraw_if_needed(1);
-}
-
-static int find_current_res_index(void) {
-    int cw = g_cfg.init_win_w, ch = g_cfg.init_win_h;
-    if (g_sdl_window && !g_fullscreen) {
-        SDL_GetWindowSize(g_sdl_window, &cw, &ch);
-    }
-    int best = 3; /* 1280x800 */
-    int best_dist = 1 << 30;
-    for (int i = 0; i < NUM_RES_PRESETS; i++) {
-        int d = abs(g_res_presets[i].w - cw) + abs(g_res_presets[i].h - ch);
-        if (d < best_dist) { best_dist = d; best = i; }
-    }
-    return best;
-}
-
-static int find_current_fps_index(void) {
-    for (int i = 0; i < NUM_FPS_PRESETS; i++) {
-        if (g_fps_presets[i] == g_cfg.max_fps) return i;
-    }
-    return 4; /* 240 */
-}
-
-static void menu_row_label_and_value(int row, char *label, size_t lsz, char *val, size_t vsz) {
-    val[0] = '\0';
-    switch (row) {
-        case MROW_DISPLAY_MODE:
-            snprintf(label, lsz, "Display Mode");
-            snprintf(val, vsz, "%s", g_fullscreen ? "Borderless Fullscreen" : "Windowed");
-            break;
-        case MROW_DISPLAY_INDEX: {
-            int nd = SDL_GetNumVideoDisplays();
-            if (nd < 1) nd = 1;
-            int di = clamp_i(g_cfg.display_index, 0, nd - 1);
-            snprintf(label, lsz, "Target Monitor");
-            snprintf(val, vsz, "Display %d / %d", di + 1, nd);
-            break;
-        }
-        case MROW_RESOLUTION: {
-            snprintf(label, lsz, "Window Resolution");
-            int ri = find_current_res_index();
-            if (g_fullscreen) {
-                int dw = 0, dh = 0;
-                if (g_sdl_window) SDL_GL_GetDrawableSize(g_sdl_window, &dw, &dh);
-                snprintf(val, vsz, "%dx%d (Win: %dx%d)", dw, dh, g_res_presets[ri].w, g_res_presets[ri].h);
-            } else {
-                snprintf(val, vsz, "%s", g_res_presets[ri].label);
-            }
-            break;
-        }
-        case MROW_ASPECT_MODE:
-            snprintf(label, lsz, "Aspect / Widescreen");
-            snprintf(val, vsz, "%s", gl_aspect_name(g_cfg.aspect_mode));
-            break;
-        case MROW_AMBIENT_BARS:
-            snprintf(label, lsz, "4:3 Menu Sidebars");
-            snprintf(val, vsz, "%s", g_cfg.ambient_bars ? "Ambient Blur" : "Pure Black");
-            break;
-        case MROW_SHADER:
-            snprintf(label, lsz, "Upscaling Shader");
-            snprintf(val, vsz, "%s", gl_shader_name(g_cfg.shader_mode));
-            break;
-        case MROW_SHARPEN:
-            snprintf(label, lsz, "CAS Sharpening");
-            snprintf(val, vsz, "%d%%", (int)(g_cfg.sharpen_strength * 100.0f + 0.5f));
-            break;
-        case MROW_VSYNC:
-            snprintf(label, lsz, "Frame Pacing / VSync");
-            snprintf(val, vsz, "%s", gl_vsync_name(g_cfg.vsync_mode));
-            break;
-        case MROW_FPS_CAP:
-            snprintf(label, lsz, "High-FPS Mode Cap");
-            if (g_cfg.max_fps <= 0) snprintf(val, vsz, "Unlimited");
-            else snprintf(val, vsz, "%d FPS", g_cfg.max_fps);
-            break;
-        case MROW_HUD:
-            snprintf(label, lsz, "Performance Stats HUD");
-            snprintf(val, vsz, "%s", g_cfg.show_hud ? "ON" : "OFF");
-            break;
-        case MROW_GAME_SPEED:
-            snprintf(label, lsz, "Game Speed (Hold Shift=2x)");
-            snprintf(val, vsz, "%s", gl_speed_name(g_cfg.game_speed));
-            break;
-        case MROW_SCREENSHOT:
-            snprintf(label, lsz, "Capture 4K Screenshot (PrtSc)");
-            snprintf(val, vsz, "Press Enter");
-            break;
-        case MROW_BLOOM:
-            snprintf(label, lsz, "Emissive Bloom Glow");
-            snprintf(val, vsz, "%s", gl_bloom_name(g_cfg.bloom_level));
-            break;
-        case MROW_COLOR_GRADE:
-            snprintf(label, lsz, "Color Grading & Vibrance");
-            snprintf(val, vsz, "%s", gl_grade_name(g_cfg.color_grade));
-            break;
-        case MROW_SILHOUETTE_AA:
-            snprintf(label, lsz, "Anti-Aliasing Mode");
-            snprintf(val, vsz, "%s", gl_aa_name(g_cfg.silhouette_aa));
-            break;
-        case MROW_AA_STRENGTH:
-            snprintf(label, lsz, "Anti-Aliasing Strength");
-            snprintf(val, vsz, "%d%%", (int)(g_cfg.aa_strength * 100.0f + 0.5f));
-            break;
-        case MROW_CLARITY:
-            snprintf(label, lsz, "Local Contrast (Clarity)");
-            snprintf(val, vsz, "%d%%", (int)(g_cfg.clarity_strength * 100.0f + 0.5f));
-            break;
-        case MROW_FILMIC:
-            snprintf(label, lsz, "Filmic HDR Tone-Map");
-            snprintf(val, vsz, "%d%%", (int)(g_cfg.filmic_strength * 100.0f + 0.5f));
-            break;
-        case MROW_DEBAND:
-            snprintf(label, lsz, "Debanding & Dither");
-            snprintf(val, vsz, "%s", g_cfg.deband_dither ? "ON" : "OFF");
-            break;
-        case MROW_ATMOSPHERE:
-            snprintf(label, lsz, "Living Atmosphere FX");
-            snprintf(val, vsz, "%s", g_cfg.atmosphere_fx ? "ON (Flicker+Dust)" : "OFF");
-            break;
-        case MROW_FONT_STYLE:
-            snprintf(label, lsz, "Game Font Style");
-            snprintf(val, vsz, "%s", gl_font_style_name(g_cfg.font_style));
-            break;
-        case MROW_TEXT_BACKDROP:
-            snprintf(label, lsz, "Text Readability Backing");
-            snprintf(val, vsz, "%s", g_cfg.text_backdrop ? "Soft Backing" : "Classic Outline");
-            break;
-        case MROW_VIGNETTE:
-            snprintf(label, lsz, "Cinematic Vignette");
-            snprintf(val, vsz, "%s", gl_vignette_name(g_cfg.vignette_level));
-            break;
-        case MROW_TRANSITIONS:
-            snprintf(label, lsz, "Scene Transitions");
-            snprintf(val, vsz, "%s", g_cfg.scene_transitions ? "Smooth Fade" : "Instant");
-            break;
-        case MROW_VIDEO_ENHANCE:
-            snprintf(label, lsz, "Cutscene Deblock + Sharpen");
-            snprintf(val, vsz, "%s", g_cfg.video_enhance ? "ON" : "OFF");
-            break;
-        case MROW_HOTSPOT_HINTS:
-            snprintf(label, lsz, "Hotspot Highlight (Space/H)");
-            snprintf(val, vsz, "%s", g_cfg.hotspot_hints ? "ON" : "OFF");
-            break;
-        case MROW_AUDIO_REVERB:
-            snprintf(label, lsz, "Audio Ambience (Reverb)");
-            snprintf(val, vsz, "%s", gl_reverb_name(g_cfg.audio_reverb));
-            break;
-        case MROW_AUDIO_EQ:
-            snprintf(label, lsz, "Audio Mastering EQ + Wide");
-            snprintf(val, vsz, "%s", gl_audio_eq_name(g_cfg.audio_eq));
-            break;
-        case MROW_HD_ASSETS:
-            snprintf(label, lsz, "HD Backgrounds (4K/2K)");
-            if (g_cfg.hd_assets_enabled) snprintf(val, vsz, "ON (%d indexed)", hd_assets_count());
-            else snprintf(val, vsz, "OFF (Original)");
-            break;
-        case MROW_HD_SPRITES:
-            snprintf(label, lsz, "HD Sprites & Characters");
-            if (g_cfg.hd_sprites_enabled) snprintf(val, vsz, "ON (%d indexed)", hd_sprites_count());
-            else snprintf(val, vsz, "OFF (Original)");
-            break;
-        case MROW_HD_TEXT:
-            snprintf(label, lsz, "Native HD Vector Text");
-            snprintf(val, vsz, "%s", g_cfg.hd_vector_text ? "ON (Monitor DPI)" : "OFF (Original)");
-            break;
-        case MROW_DECOUPLED_CURSOR:
-            snprintf(label, lsz, "High-Refresh Cursor");
-            snprintf(val, vsz, "%s", g_cfg.decoupled_cursor ? "ON (Decoupled)" : "OFF (Software)");
-            break;
-        case MROW_VOLUME:
-            snprintf(label, lsz, "Master Volume");
-            if (g_cfg.muted) snprintf(val, vsz, "Muted");
-            else snprintf(val, vsz, "%d%%", (int)(g_cfg.master_volume * 100.0f + 0.5f));
-            break;
-        case MROW_CLOSE:
-            snprintf(label, lsz, "Close Settings Menu");
-            snprintf(val, vsz, "[ F1 / Esc ]");
-            break;
-        default:
-            if (lsz > 0) label[0] = '\0';
-            break;
-    }
-}
-
-static void menu_apply_delta(int row_id, int dir) {
-    if (dir == 0) dir = 1;
-    switch (row_id) {
-        case MROW_DISPLAY_MODE:
-            gl_renderer_toggle_fullscreen();
-            return;
-        case MROW_DISPLAY_INDEX: {
-            int nd = SDL_GetNumVideoDisplays();
-            if (nd < 1) nd = 1;
-            g_cfg.display_index = (g_cfg.display_index + dir + nd) % nd;
-            if (g_sdl_window) {
-                SDL_Rect b;
-                if (SDL_GetDisplayBounds(g_cfg.display_index, &b) == 0) {
-                    int was_fs = g_fullscreen;
-                    if (was_fs) SDL_SetWindowFullscreen(g_sdl_window, 0);
-                    int ww = g_cfg.init_win_w, wh = g_cfg.init_win_h;
-                    SDL_GetWindowSize(g_sdl_window, &ww, &wh);
-                    SDL_SetWindowPosition(g_sdl_window, b.x + (b.w - ww) / 2, b.y + (b.h - wh) / 2);
-                    if (was_fs) SDL_SetWindowFullscreen(g_sdl_window, SDL_WINDOW_FULLSCREEN_DESKTOP);
-                }
-            }
-            gl_renderer_show_toast("Target Monitor: Display %d / %d", g_cfg.display_index + 1, nd);
-            break;
-        }
-        case MROW_RESOLUTION: {
-            int ri = (find_current_res_index() + dir + NUM_RES_PRESETS) % NUM_RES_PRESETS;
-            g_cfg.init_win_w = g_res_presets[ri].w;
-            g_cfg.init_win_h = g_res_presets[ri].h;
-            if (g_sdl_window) {
-                if (g_fullscreen) {
-                    g_fullscreen = 0;
-                    SDL_SetWindowFullscreen(g_sdl_window, 0);
-                }
-                SDL_SetWindowSize(g_sdl_window, g_cfg.init_win_w, g_cfg.init_win_h);
-                SDL_SetWindowPosition(g_sdl_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-            }
-            gl_renderer_show_toast("Resolution: %s", g_res_presets[ri].label);
-            break;
-        }
-        case MROW_ASPECT_MODE:
-            g_cfg.aspect_mode = (g_cfg.aspect_mode + dir + ASPECT_COUNT) % ASPECT_COUNT;
-            gl_renderer_show_toast("Aspect / Widescreen: %s", gl_aspect_name(g_cfg.aspect_mode));
-            break;
-        case MROW_AMBIENT_BARS:
-            g_cfg.ambient_bars = !g_cfg.ambient_bars;
-            gl_renderer_show_toast("4:3 Menu Sidebars: %s", g_cfg.ambient_bars ? "Ambient Blur" : "Pure Black");
-            break;
-        case MROW_SHADER:
-            g_cfg.shader_mode = (g_cfg.shader_mode + dir + SHADER_COUNT) % SHADER_COUNT;
-            gl_renderer_show_toast("Upscaler: %s", gl_shader_name(g_cfg.shader_mode));
-            break;
-        case MROW_SHARPEN: {
-            int pct = (int)(g_cfg.sharpen_strength * 100.0f + 0.5f);
-            pct = ((pct + 5) / 10) * 10 + dir * 10;
-            if (pct < 0) pct = 0;
-            if (pct > 100) pct = 100;
-            g_cfg.sharpen_strength = (float)pct / 100.0f;
-            break;
-        }
-        case MROW_VSYNC:
-            g_cfg.vsync_mode = (g_cfg.vsync_mode + dir + VSYNC_COUNT) % VSYNC_COUNT;
-            apply_vsync_mode();
-            gl_renderer_show_toast("Frame Pacing: %s", gl_vsync_name(g_cfg.vsync_mode));
-            break;
-        case MROW_FPS_CAP: {
-            int fi = (find_current_fps_index() + dir + NUM_FPS_PRESETS) % NUM_FPS_PRESETS;
-            g_cfg.max_fps = g_fps_presets[fi];
-            break;
-        }
-        case MROW_HUD:
-            gl_renderer_toggle_hud();
-            return;
-        case MROW_GAME_SPEED:
-            g_cfg.game_speed = (g_cfg.game_speed + dir + SPEED_COUNT) % SPEED_COUNT;
-            gl_renderer_show_toast("Game Speed: %s", gl_speed_name(g_cfg.game_speed));
-            break;
-        case MROW_SCREENSHOT:
-            gl_menu_toggle();
-            gl_renderer_request_screenshot();
-            return;
-        case MROW_BLOOM:
-            g_cfg.bloom_level = (g_cfg.bloom_level + dir + BLOOM_COUNT) % BLOOM_COUNT;
-            gl_renderer_show_toast("Emissive Bloom: %s", gl_bloom_name(g_cfg.bloom_level));
-            break;
-        case MROW_COLOR_GRADE:
-            g_cfg.color_grade = (g_cfg.color_grade + dir + GRADE_COUNT) % GRADE_COUNT;
-            gl_renderer_show_toast("Color Grading: %s", gl_grade_name(g_cfg.color_grade));
-            break;
-        case MROW_SILHOUETTE_AA:
-            g_cfg.silhouette_aa = (g_cfg.silhouette_aa + dir + AA_COUNT) % AA_COUNT;
-            gl_renderer_show_toast("Anti-Aliasing: %s", gl_aa_name(g_cfg.silhouette_aa));
-            break;
-        case MROW_AA_STRENGTH: {
-            int pct = (int)(g_cfg.aa_strength * 100.0f + 0.5f);
-            pct = ((pct + 5) / 10) * 10 + dir * 10;
-            if (pct < 0) pct = 0;
-            if (pct > 100) pct = 100;
-            g_cfg.aa_strength = (float)pct / 100.0f;
-            break;
-        }
-        case MROW_CLARITY: {
-            int pct = (int)(g_cfg.clarity_strength * 100.0f + 0.5f);
-            pct = ((pct + 5) / 10) * 10 + dir * 10;
-            if (pct < 0) pct = 0;
-            if (pct > 100) pct = 100;
-            g_cfg.clarity_strength = (float)pct / 100.0f;
-            break;
-        }
-        case MROW_FILMIC: {
-            int pct = (int)(g_cfg.filmic_strength * 100.0f + 0.5f);
-            pct = ((pct + 5) / 10) * 10 + dir * 10;
-            if (pct < 0) pct = 0;
-            if (pct > 100) pct = 100;
-            g_cfg.filmic_strength = (float)pct / 100.0f;
-            break;
-        }
-        case MROW_DEBAND:
-            g_cfg.deband_dither = !g_cfg.deband_dither;
-            gl_renderer_show_toast("Debanding & Dither: %s", g_cfg.deband_dither ? "ON" : "OFF");
-            break;
-        case MROW_ATMOSPHERE:
-            g_cfg.atmosphere_fx = !g_cfg.atmosphere_fx;
-            gl_renderer_show_toast("Living Atmosphere FX: %s", g_cfg.atmosphere_fx ? "ON" : "OFF");
-            break;
-        case MROW_FONT_STYLE:
-            g_cfg.font_style = (g_cfg.font_style + dir + FONT_STYLE_COUNT) % FONT_STYLE_COUNT;
-            flush_canvas_text_cache();
-            gl_renderer_show_toast("Game Font Style: %s", gl_font_style_name(g_cfg.font_style));
-            break;
-        case MROW_TEXT_BACKDROP:
-            g_cfg.text_backdrop = !g_cfg.text_backdrop;
-            flush_canvas_text_cache();
-            gl_renderer_show_toast("Text Backing: %s", g_cfg.text_backdrop ? "Soft Backing" : "Classic Outline");
-            break;
-        case MROW_VIGNETTE:
-            g_cfg.vignette_level = (g_cfg.vignette_level + dir + VIGNETTE_COUNT) % VIGNETTE_COUNT;
-            gl_renderer_show_toast("Cinematic Vignette: %s", gl_vignette_name(g_cfg.vignette_level));
-            break;
-        case MROW_TRANSITIONS:
-            g_cfg.scene_transitions = !g_cfg.scene_transitions;
-            gl_renderer_show_toast("Scene Transitions: %s", g_cfg.scene_transitions ? "Smooth Fade" : "Instant");
-            break;
-        case MROW_VIDEO_ENHANCE:
-            g_cfg.video_enhance = !g_cfg.video_enhance;
-            gl_renderer_show_toast("Cutscene Deblock + Sharpen: %s", g_cfg.video_enhance ? "ON" : "OFF");
-            break;
-        case MROW_HOTSPOT_HINTS:
-            g_cfg.hotspot_hints = !g_cfg.hotspot_hints;
-            gl_renderer_show_toast("Hotspot Highlight: %s", g_cfg.hotspot_hints ? "ON (Hold Space/H)" : "OFF");
-            break;
-        case MROW_AUDIO_REVERB: {
-            int rev = (g_cfg.audio_reverb + dir + REVERB_COUNT) % REVERB_COUNT;
-            __atomic_store_n(&g_cfg.audio_reverb, rev, __ATOMIC_RELAXED);
-            gl_renderer_show_toast("Audio Ambience: %s", gl_reverb_name(rev));
-            break;
-        }
-        case MROW_AUDIO_EQ: {
-            int eq = (g_cfg.audio_eq + dir + EQ_COUNT) % EQ_COUNT;
-            __atomic_store_n(&g_cfg.audio_eq, eq, __ATOMIC_RELAXED);
-            gl_renderer_show_toast("Audio Mastering EQ: %s", gl_audio_eq_name(eq));
-            break;
-        }
-        case MROW_HD_ASSETS:
-            gl_renderer_toggle_hd_assets();
-            return;
-        case MROW_HD_SPRITES:
-            g_cfg.hd_sprites_enabled = !g_cfg.hd_sprites_enabled;
-            gl_renderer_show_toast("HD Sprites & Characters: %s", g_cfg.hd_sprites_enabled ? "ON" : "OFF");
-            break;
-        case MROW_HD_TEXT:
-            gl_renderer_toggle_hd_text();
-            return;
-        case MROW_DECOUPLED_CURSOR:
-            gl_renderer_toggle_decoupled_cursor();
-            return;
-        case MROW_VOLUME:
-            if (g_cfg.muted && dir > 0) {
-                __atomic_store_n(&g_cfg.muted, 0, __ATOMIC_RELAXED);
-            } else {
-                float vol = g_cfg.master_volume + (float)dir * 0.1f;
-                if (vol <= 0.01f) {
-                    vol = 0.0f;
-                    __atomic_store(&g_cfg.master_volume, &vol, __ATOMIC_RELAXED);
-                    __atomic_store_n(&g_cfg.muted, 1, __ATOMIC_RELAXED);
-                } else {
-                    if (vol > 1.5f) vol = 1.5f;
-                    __atomic_store(&g_cfg.master_volume, &vol, __ATOMIC_RELAXED);
-                    __atomic_store_n(&g_cfg.muted, 0, __ATOMIC_RELAXED);
-                }
-            }
-            break;
-        case MROW_CLOSE:
-            gl_menu_toggle();
-            return;
-        default:
-            break;
-    }
-    gl_config_save(NULL);
-    g_menu_dirty = 1;
-    gl_renderer_redraw_if_needed(1);
-}
-
-static void menu_switch_tab(int new_tab) {
-    new_tab = ((new_tab % 3) + 3) % 3;
-    if (new_tab == g_menu_tab) return;
-    g_menu_tab = new_tab;
-    int cnt = menu_active_row_count();
-    if (g_menu_sel >= cnt) g_menu_sel = cnt - 1;
-    g_menu_dirty = 1;
-    gl_renderer_redraw_if_needed(1);
-}
-
-static int menu_hit_test(int win_x, int win_y, int *out_dir, int *out_tab_hit) {
-    if (out_tab_hit) *out_tab_hit = -1;
-    if (g_menu_win_w <= 1.0f || g_menu_win_h <= 1.0f) return -2; /* outside */
-    float rx = ((float)win_x - g_menu_win_x) / g_menu_win_w;
-    float ry = ((float)win_y - g_menu_win_y) / g_menu_win_h;
-    if (rx < 0.0f || rx > 1.0f || ry < 0.0f || ry > 1.0f) return -2; /* outside */
-    if (ry >= g_menu_tabs_top_frac && ry <= g_menu_tabs_bot_frac) {
-        if (out_tab_hit) *out_tab_hit = (rx < 0.333f) ? 0 : ((rx < 0.667f) ? 1 : 2);
-        return -1;
-    }
-    int cnt = menu_active_row_count();
-    int row = (int)((ry - g_menu_rows_top_frac) / g_menu_row_h_frac);
-    if (row < 0 || row >= cnt) return -1;
-    if (out_dir) {
-        *out_dir = (rx >= 0.52f && rx < 0.74f) ? -1 : 1;
-    }
-    return row;
-}
-
-int gl_menu_handle_event(const SDL_Event *ev) {
-    if (!g_menu_open || !ev) return 0;
-    int cnt = menu_active_row_count();
-    switch (ev->type) {
-        case SDL_KEYDOWN: {
-            SDL_Keycode sym = ev->key.keysym.sym;
-            if (sym == SDLK_ESCAPE) {
-                gl_menu_toggle();
-                return 1;
-            }
-            if (sym == SDLK_TAB || sym == SDLK_e) {
-                menu_switch_tab(g_menu_tab + 1);
-                return 1;
-            }
-            if (sym == SDLK_q) {
-                menu_switch_tab(g_menu_tab - 1);
-                return 1;
-            }
-            if (sym == SDLK_UP || sym == SDLK_w) {
-                g_menu_sel = (g_menu_sel - 1 + cnt) % cnt;
-                g_menu_dirty = 1;
-                gl_renderer_redraw_if_needed(1);
-                return 1;
-            }
-            if (sym == SDLK_DOWN || sym == SDLK_s) {
-                g_menu_sel = (g_menu_sel + 1) % cnt;
-                g_menu_dirty = 1;
-                gl_renderer_redraw_if_needed(1);
-                return 1;
-            }
-            if (sym == SDLK_LEFT || sym == SDLK_a) {
-                menu_apply_delta(menu_active_row_id(g_menu_sel), -1);
-                return 1;
-            }
-            if (sym == SDLK_RIGHT || sym == SDLK_d || sym == SDLK_RETURN || sym == SDLK_SPACE) {
-                menu_apply_delta(menu_active_row_id(g_menu_sel), 1);
-                return 1;
-            }
-            return 1;
-        }
-        case SDL_MOUSEMOTION: {
-            int row = menu_hit_test(ev->motion.x, ev->motion.y, NULL, NULL);
-            if (row >= 0 && row != g_menu_sel) {
-                g_menu_sel = row;
-                g_menu_dirty = 1;
-                gl_renderer_redraw_if_needed(1);
-            }
-            return 1;
-        }
-        case SDL_MOUSEBUTTONDOWN: {
-            if (ev->button.button == SDL_BUTTON_LEFT || ev->button.button == SDL_BUTTON_RIGHT) {
-                int dir = 1, tab_hit = -1;
-                int row = menu_hit_test(ev->button.x, ev->button.y, &dir, &tab_hit);
-                if (tab_hit >= 0) {
-                    menu_switch_tab(tab_hit);
-                } else if (row >= 0) {
-                    g_menu_sel = row;
-                    if (ev->button.button == SDL_BUTTON_RIGHT) dir = -1;
-                    menu_apply_delta(menu_active_row_id(row), dir);
-                } else if (row == -2) {
-                    gl_menu_toggle();
-                }
-            }
-            return 1;
-        }
-        case SDL_MOUSEWHEEL: {
-            if (ev->wheel.y != 0) {
-                menu_apply_delta(menu_active_row_id(g_menu_sel), (ev->wheel.y > 0) ? 1 : -1);
-            }
-            return 1;
-        }
-        default:
-            return 0;
-    }
-}
-
-static void render_menu_texture(int draw_w, int draw_h) {
-    float scale = (float)draw_h / 960.0f;
-    if (scale < 0.65f) scale = 0.65f;
-    if (scale > 1.65f) scale = 1.65f;
-
-    int pw = (int)(690.0f * scale);
-    int ph = (int)(670.0f * scale);
-    if (pw > draw_w - 40) pw = draw_w - 40;
-    if (ph > draw_h - 40) ph = draw_h - 40;
-    if (pw < 380) pw = 380;
-    if (ph < 400) ph = 400;
-
-    SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormat(0, pw, ph, 32, SDL_PIXELFORMAT_ABGR8888);
-    if (!surf) return;
-
-    /* Solid dark obsidian backdrop + golden border */
-    SDL_FillRect(surf, NULL, SDL_MapRGBA(surf->format, 12, 14, 22, 244));
-    Uint32 gold = SDL_MapRGBA(surf->format, 214, 178, 64, 248);
-    Uint32 gold_dim = SDL_MapRGBA(surf->format, 120, 96, 36, 220);
-    int bw = (int)(2.0f * scale + 0.5f); if (bw < 2) bw = 2;
-    SDL_Rect b_top = {0, 0, pw, bw}, b_bot = {0, ph - bw, pw, bw};
-    SDL_Rect b_lft = {0, 0, bw, ph}, b_rgt = {pw - bw, 0, bw, ph};
-    SDL_FillRect(surf, &b_top, gold);
-    SDL_FillRect(surf, &b_bot, gold);
-    SDL_FillRect(surf, &b_lft, gold);
-    SDL_FillRect(surf, &b_rgt, gold);
-
-    int hdr_h = (int)(ph * 0.095f);
-    SDL_Rect hdr_bg = {bw, bw, pw - bw * 2, hdr_h};
-    SDL_FillRect(surf, &hdr_bg, SDL_MapRGBA(surf->format, 20, 20, 30, 248));
-
-    TTF_Font *f_title = get_native_font((int)(20.0f * scale + 0.5f), 1);
-    TTF_Font *f_tab   = get_native_font((int)(15.0f * scale + 0.5f), 1);
-    TTF_Font *f_row   = get_native_font((int)(16.0f * scale + 0.5f), 0);
-    TTF_Font *f_val   = get_native_font((int)(16.0f * scale + 0.5f), 1);
-    TTF_Font *f_foot  = get_native_font((int)(13.0f * scale + 0.5f), 0);
-
-    SDL_Color col_gold   = { 242, 206, 98, 255 };
-    SDL_Color col_label  = { 225, 228, 236, 255 };
-    SDL_Color col_val    = { 250, 232, 165, 255 };
-    SDL_Color col_sel    = { 255, 245, 210, 255 };
-    SDL_Color col_dim    = { 155, 162, 178, 255 };
-
-    if (f_title) {
-        SDL_Surface *t = TTF_RenderUTF8_Blended(f_title, "REMASTER v5  -  GRAPHICS & ENGINE SETTINGS", col_gold);
-        if (t) {
-            SDL_Rect dst = { (pw - t->w) / 2, bw + (hdr_h - t->h) / 2, t->w, t->h };
-            SDL_BlitSurface(t, NULL, surf, &dst);
-            SDL_FreeSurface(t);
-        }
-    }
-
-    /* 3-Tab Bar */
-    int pad_x = (int)(26.0f * scale);
-    int tabs_y = bw + hdr_h + (int)(6.0f * scale);
-    int tabs_h = (int)(38.0f * scale);
-    int tab_gap = (int)(8.0f * scale);
-    int tab_w = (pw - pad_x * 2 - tab_gap * 2) / 3;
-    g_menu_tabs_top_frac = (float)tabs_y / (float)ph;
-    g_menu_tabs_bot_frac = (float)(tabs_y + tabs_h) / (float)ph;
-
-    const char *tab_names[3] = { "1. DISPLAY", "2. POST-FX", "3. ASSETS & TEXT" };
-    for (int t = 0; t < 3; t++) {
-        SDL_Rect tr = { pad_x + t * (tab_w + tab_gap), tabs_y, tab_w, tabs_h };
-        int act = (t == g_menu_tab);
-        SDL_FillRect(surf, &tr, act ? SDL_MapRGBA(surf->format, 76, 60, 24, 248)
-                                    : SDL_MapRGBA(surf->format, 24, 27, 40, 244));
-        SDL_Rect tb = { tr.x, tr.y + tr.h - 3, tr.w, 3 };
-        SDL_FillRect(surf, &tb, act ? gold : gold_dim);
-        if (f_tab) {
-            SDL_Surface *ts = TTF_RenderUTF8_Blended(f_tab, tab_names[t], act ? col_gold : col_dim);
-            if (ts) {
-                SDL_Rect dst = { tr.x + (tr.w - ts->w) / 2, tr.y + (tr.h - ts->h) / 2, ts->w, ts->h };
-                SDL_BlitSurface(ts, NULL, surf, &dst);
-                SDL_FreeSurface(ts);
-            }
-        }
-    }
-
-    int rows_top = tabs_y + tabs_h + (int)(12.0f * scale);
-    int foot_h   = (int)(38.0f * scale);
-    int avail_h  = ph - rows_top - foot_h - bw;
-    int cnt      = menu_active_row_count();
-    int row_h    = avail_h / cnt;
-    g_menu_rows_top_frac = (float)rows_top / (float)ph;
-    g_menu_row_h_frac    = (float)row_h / (float)ph;
-
-    for (int i = 0; i < cnt; i++) {
-        int row_id = menu_active_row_id(i);
-        int ry = rows_top + i * row_h;
-        if (i == g_menu_sel) {
-            SDL_Rect hl = { pad_x - 10, ry + 2, pw - (pad_x - 10) * 2, row_h - 4 };
-            SDL_FillRect(surf, &hl, SDL_MapRGBA(surf->format, 82, 64, 24, 248));
-            SDL_Rect hl_l = { hl.x, hl.y, 4, hl.h };
-            SDL_FillRect(surf, &hl_l, gold);
-        } else if (i % 2 == 1) {
-            SDL_Rect alt = { pad_x - 10, ry + 2, pw - (pad_x - 10) * 2, row_h - 4 };
-            SDL_FillRect(surf, &alt, SDL_MapRGBA(surf->format, 24, 27, 40, 244));
-        }
-
-        char lbl[96], val[96], val_fmt[112];
-        menu_row_label_and_value(row_id, lbl, sizeof(lbl), val, sizeof(val));
-        if (row_id == MROW_CLOSE) {
-            snprintf(val_fmt, sizeof(val_fmt), "%s", val);
-        } else {
-            snprintf(val_fmt, sizeof(val_fmt), "<  %s  >", val);
-        }
-
-        if (f_row && lbl[0]) {
-            SDL_Surface *tl = TTF_RenderUTF8_Blended(f_row, lbl, (i == g_menu_sel) ? col_sel : col_label);
-            if (tl) {
-                SDL_Rect dst = { pad_x, ry + (row_h - tl->h) / 2, tl->w, tl->h };
-                SDL_BlitSurface(tl, NULL, surf, &dst);
-                SDL_FreeSurface(tl);
-            }
-        }
-        if (f_val && val_fmt[0]) {
-            SDL_Surface *tv = TTF_RenderUTF8_Blended(f_val, val_fmt, (i == g_menu_sel) ? col_gold : col_val);
-            if (tv) {
-                SDL_Rect dst = { pw - pad_x - tv->w, ry + (row_h - tv->h) / 2, tv->w, tv->h };
-                SDL_BlitSurface(tv, NULL, surf, &dst);
-                SDL_FreeSurface(tv);
-            }
-        }
-    }
-
-    if (f_foot) {
-        const char *hint = "Tab / Click Tabs to switch page   |   Click / Scroll / Arrows to adjust   |   Auto-Saved (mha2_settings.ini)";
-        SDL_Surface *tf = TTF_RenderUTF8_Blended(f_foot, hint, col_dim);
-        if (tf) {
-            SDL_Rect dst = { (pw - tf->w) / 2, ph - foot_h + (foot_h - tf->h) / 2 - bw, tf->w, tf->h };
-            SDL_BlitSurface(tf, NULL, surf, &dst);
-            SDL_FreeSurface(tf);
-        }
-    }
-
-    if (g_menu_tex) glDeleteTextures(1, &g_menu_tex);
-    glGenTextures(1, &g_menu_tex);
-    glBindTexture(GL_TEXTURE_2D, g_menu_tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, pw, ph, 0, GL_RGBA, GL_UNSIGNED_BYTE, surf->pixels);
-    SDL_FreeSurface(surf);
-
-    g_menu_tex_w = pw;
-    g_menu_tex_h = ph;
-    g_menu_last_draw_w = draw_w;
-    g_menu_last_draw_h = draw_h;
-    g_menu_dirty = 0;
-}
-
-static void gl_menu_draw(int draw_w, int draw_h) {
-    if (g_menu_dirty || !g_menu_tex || g_menu_last_draw_w != draw_w || g_menu_last_draw_h != draw_h) {
-        render_menu_texture(draw_w, draw_h);
-    }
-    if (!g_menu_tex) return;
-    int px = (draw_w - g_menu_tex_w) / 2;
-    int py = (draw_h - g_menu_tex_h) / 2;
-    draw_osd_quad(g_menu_tex, px, py, g_menu_tex_w, g_menu_tex_h, draw_w, draw_h, 1.0f);
-
-    int win_w = draw_w, win_h = draw_h;
-    if (g_sdl_window) SDL_GetWindowSize(g_sdl_window, &win_w, &win_h);
-    float sx = (draw_w > 0) ? ((float)win_w / (float)draw_w) : 1.0f;
-    float sy = (draw_h > 0) ? ((float)win_h / (float)draw_h) : 1.0f;
-    g_menu_win_x = (float)px * sx;
-    g_menu_win_y = (float)py * sy;
-    g_menu_win_w = (float)g_menu_tex_w * sx;
-    g_menu_win_h = (float)g_menu_tex_h * sy;
-}
-
-/* ---- In-Game Dialog & Clue History Overlay (L key) ---- */
-#define DIALOG_LOG_CAP 32
-static char   g_dialog_log[DIALOG_LOG_CAP][256];
-static int    g_dialog_log_count = 0;
-static int    g_dialog_log_open  = 0;
-static int    g_dialog_log_dirty = 1;
-static GLuint g_dialog_log_tex   = 0;
-static int    g_dialog_log_tw = 0, g_dialog_log_th = 0;
-
-void gl_renderer_log_dialog(const char *utf8) {
-    if (!utf8) return;
-    size_t len = strlen(utf8);
-    if (len < 12) return; /* ignore short scores & 1-word hover labels */
-    int has_space = 0;
-    for (size_t i = 0; i < len; i++) {
-        if (utf8[i] == ' ') { has_space = 1; break; }
-    }
-    if (!has_space) return;
-    /* Deduplicate against recent 6 entries (dirty-rect redraws repaint the same line) */
-    int check = g_dialog_log_count < 6 ? g_dialog_log_count : 6;
-    for (int i = 0; i < check; i++) {
-        if (strcmp(g_dialog_log[g_dialog_log_count - 1 - i], utf8) == 0) return;
-    }
-    if (g_dialog_log_count < DIALOG_LOG_CAP) {
-        snprintf(g_dialog_log[g_dialog_log_count], sizeof(g_dialog_log[0]), "%s", utf8);
-        g_dialog_log_count++;
-    } else {
-        memmove(g_dialog_log[0], g_dialog_log[1], (DIALOG_LOG_CAP - 1) * sizeof(g_dialog_log[0]));
-        snprintf(g_dialog_log[DIALOG_LOG_CAP - 1], sizeof(g_dialog_log[0]), "%s", utf8);
-    }
-    g_dialog_log_dirty = 1;
-}
-
-void gl_renderer_toggle_dialog_log(void) {
-    g_dialog_log_open = !g_dialog_log_open;
-    g_dialog_log_dirty = 1;
-    gl_renderer_redraw_if_needed(1);
-}
-
-int gl_renderer_is_dialog_log_open(void) {
-    return g_dialog_log_open;
-}
-
-static void gl_dialog_log_draw(int draw_w, int draw_h) {
-    if (!g_dialog_log_open || draw_w <= 0 || draw_h <= 0) return;
-    if (g_dialog_log_dirty || !g_dialog_log_tex) {
-        init_osd_font();
-        int pw = (draw_w * 72) / 100;
-        int ph = (draw_h * 74) / 100;
-        if (pw < 560) pw = 560;
-        if (ph < 380) ph = 380;
-        if (pw > draw_w - 40) pw = draw_w - 40;
-        if (ph > draw_h - 40) ph = draw_h - 40;
-        SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormat(0, pw, ph, 32, SDL_PIXELFORMAT_RGBA32);
-        if (!surf) return;
-        SDL_FillRect(surf, NULL, SDL_MapRGBA(surf->format, 14, 18, 30, 238));
-        /* Gold border */
-        Uint32 gold = SDL_MapRGBA(surf->format, 235, 192, 72, 245);
-        SDL_Rect top_b = { 0, 0, pw, 3 }, bot_b = { 0, ph - 3, pw, 3 };
-        SDL_Rect lft_b = { 0, 0, 3, ph }, rgt_b = { pw - 3, 0, 3, ph };
-        SDL_FillRect(surf, &top_b, gold); SDL_FillRect(surf, &bot_b, gold);
-        SDL_FillRect(surf, &lft_b, gold); SDL_FillRect(surf, &rgt_b, gold);
-
-        int fsz = (ph >= 700) ? 22 : 16;
-        TTF_Font *ft_title = get_native_font(fsz + 4, 1);
-        TTF_Font *ft_body  = get_native_font(fsz, 0);
-        if (!ft_title) ft_title = g_osd_font;
-        if (!ft_body)  ft_body  = g_osd_font;
-
-        if (ft_title) {
-            SDL_Color cg = { 248, 212, 98, 255 };
-            SDL_Surface *ts = TTF_RenderUTF8_Blended(ft_title, "DIALOG & CLUE HISTORY  (Press Ctrl+L or Esc to close)", cg);
-            if (ts) {
-                SDL_Rect dr = { (pw - ts->w) / 2, 18, ts->w, ts->h };
-                SDL_BlitSurface(ts, NULL, surf, &dr);
-                SDL_FreeSurface(ts);
-            }
-        }
-        int y = 64;
-        int line_h = fsz + 14;
-        if (ft_body) {
-            if (g_dialog_log_count == 0) {
-                SDL_Color cm = { 175, 185, 205, 255 };
-                SDL_Surface *ts = TTF_RenderUTF8_Blended(ft_body, "No dialog lines recorded yet. Talk to characters or examine objects!", cm);
-                if (ts) {
-                    SDL_Rect dr = { 28, y + 12, ts->w, ts->h };
-                    SDL_BlitSurface(ts, NULL, surf, &dr);
-                    SDL_FreeSurface(ts);
-                }
-            } else {
-                int max_lines = (ph - y - 24) / line_h;
-                int start = (g_dialog_log_count > max_lines) ? (g_dialog_log_count - max_lines) : 0;
-                for (int i = start; i < g_dialog_log_count && y + line_h < ph - 14; i++) {
-                    SDL_Color cw = (i == g_dialog_log_count - 1)
-                        ? (SDL_Color){ 255, 238, 165, 255 }
-                        : (SDL_Color){ 224, 230, 242, 255 };
-                    SDL_Surface *ts = TTF_RenderUTF8_Blended(ft_body, g_dialog_log[i], cw);
-                    if (ts) {
-                        SDL_Rect sr = { 0, 0, ts->w > (pw - 56) ? (pw - 56) : ts->w, ts->h };
-                        SDL_Rect dr = { 28, y, sr.w, sr.h };
-                        SDL_BlitSurface(ts, &sr, surf, &dr);
-                        SDL_FreeSurface(ts);
-                    }
-                    y += line_h;
-                }
-            }
-        }
-        if (g_dialog_log_tex) glDeleteTextures(1, &g_dialog_log_tex);
-        glGenTextures(1, &g_dialog_log_tex);
-        glBindTexture(GL_TEXTURE_2D, g_dialog_log_tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, pw, ph, 0, GL_RGBA, GL_UNSIGNED_BYTE, surf->pixels);
-        SDL_FreeSurface(surf);
-        g_dialog_log_tw = pw;
-        g_dialog_log_th = ph;
-        g_dialog_log_dirty = 0;
-    }
-    if (g_dialog_log_tex) {
-        draw_osd_quad(g_dialog_log_tex, (draw_w - g_dialog_log_tw) / 2, (draw_h - g_dialog_log_th) / 2,
-                      g_dialog_log_tw, g_dialog_log_th, draw_w, draw_h, 1.0f);
-    }
-}
-
-static void gl_dialog_log_shutdown(void) {
-    if (g_dialog_log_tex) {
-        glDeleteTextures(1, &g_dialog_log_tex);
-        g_dialog_log_tex = 0;
-    }
-    g_dialog_log_dirty = 1;
-}

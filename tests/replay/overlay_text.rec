@@ -1,0 +1,42 @@
+# Accessibility: F1 -> 3. ASSETS & TEXT -> Overlay Text Size 175%; the dialog log must
+# word-wrap the monologue at the larger size and hotspot labels must scale.
+#! threshold 04_hotspots_175 0.12   (hotspot markers pulse with wall-clock time)
+wait video 60
+1000 tap Escape
+wait menu 60
+1500 expect menu
++0 shot 01_main_menu
++0 hash main_menu
++0 click 60 553
+wait room x/006 30
+1500 shot 02_chapter_select
++0 click 114 566
++2000 tap Escape
+wait room l/001 30
+wait interactive 120
+1000 key down Left Ctrl
++100 tap L
++100 key up Left Ctrl
++800 shotfull 01_log_100
++0 tap Escape
++500 tap F1
++600 tap Tab
++300 tap Tab
++300 tap Up
++200 tap Up
++400 shotfull 02_menu_text_row
++0 tap Return
++300 tap Return
++300 tap Return
++500 shotfull 03_menu_175
++0 tap Escape
++500 key down Left Ctrl
++100 tap L
++100 key up Left Ctrl
++800 shotfull 03_log_175
++0 tap Escape
++500 move 400 120
++400 key down Space
++700 shotfull 04_hotspots_175
++0 key up Space
++300 quit
