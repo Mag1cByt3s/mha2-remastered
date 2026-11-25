@@ -49,12 +49,12 @@ static void print_help(const char *prog) {
     printf("  --width <W> --height <H> Initial window size (default: 1280x800)\n");
     printf("  --aspect <mode>          Widescreen mode: auto (default), 16:10, 16:9, 4:3\n");
     printf("  --no-ambient-bars        Use pure black sidebars on 4:3 menus instead of ambient blur\n");
-    printf("  --shader <name>          Upscaler: bicubic (default), lanczos, edge, bilinear, nearest, crt\n");
+    printf("  --shader <name>          Upscaler: bicubic (default), lanczos, edge, bilinear, nearest, crt, fsr\n");
     printf("  --vsync <mode>           Frame pacing: adaptive (default), on, off\n");
     printf("  --fps <N>                FPS cap when --vsync off (default: 240)\n");
     printf("  --16bit                  Use original 16-bit RGB565 instead of 32-bit True Color\n");
-    printf("  --hd-dir <dir>           Directory containing HD PNG replacements (default: hd_assets)\n");
-    printf("  --no-hd-assets           Disable HD PNG background override\n");
+    printf("  --hd-dir <dir>           Directory containing the HD asset pack (default: hd_assets)\n");
+    printf("  --no-hd-assets           Disable HD background override\n");
     printf("  --no-hd-sprites          Disable HD RGBA foreground sprite override\n");
     printf("  --no-hd-text             Disable native monitor-DPI vector text rendering\n");
     printf("  --no-hw-cursor           Disable high-refresh decoupled cursor rendering\n");

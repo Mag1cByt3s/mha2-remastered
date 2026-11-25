@@ -944,8 +944,13 @@ static void render_menu_texture(int draw_w, int draw_h) {
             : "Tab / Click Tabs to switch page   |   Click / Scroll / Arrows to adjust   |   Auto-Saved (mha2_settings.ini)";
         SDL_Surface *tf = TTF_RenderUTF8_Blended(f_foot, hint, col_dim);
         if (tf) {
-            SDL_Rect dst = { (pw - tf->w) / 2, ph - foot_h + (foot_h - tf->h) / 2 - bw, tf->w, tf->h };
-            SDL_BlitSurface(tf, NULL, surf, &dst);
+            /* Shrink hints wider than the panel (long CONTROLS hint, larger text sizes) */
+            int max_w = pw - 2 * (bw + 8);
+            int w = tf->w, h = tf->h;
+            if (max_w > 0 && w > max_w) { h = h * max_w / w; w = max_w; }
+            SDL_Rect dst = { (pw - w) / 2, ph - foot_h + (foot_h - h) / 2 - bw, w, h };
+            if (w == tf->w) SDL_BlitSurface(tf, NULL, surf, &dst);
+            else SDL_BlitScaled(tf, NULL, surf, &dst);
             SDL_FreeSurface(tf);
         }
     }

@@ -146,7 +146,7 @@ def main():
             continue
         remaster_video(desc, src, dst, batch_size=args.batch, device=device, dtype=dtype)
 
-    # Symlink low-bitrate/50fps variants (ih/oh/sh) -> 4K master MP4s so every cutscene path uses 4K!
+    # Symlink the MPEG-1 "AVIhard" variants (ih/oh/sh, the ones the game plays by default) -> 4K masters
     for alias, target in (("mha2ih.mp4", "mha2il.mp4"), ("mha2oh.mp4", "mha2ol.mp4"), ("mha2sh.mp4", "mha2sl.mp4")):
         apth = os.path.join(args.out_dir, alias)
         tpth = os.path.join(args.out_dir, target)

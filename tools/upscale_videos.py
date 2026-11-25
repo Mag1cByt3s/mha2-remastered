@@ -2,9 +2,10 @@
 """
 Moorhuhn Adventure 2 — AI Neural FMV Cutscene Remaster Tool (Real-ESRGAN Video + FFmpeg).
 
-Upscales game_files/*.avi cutscenes (mha2il.avi, mha2ol.avi, mha2sl.avi) on your GPU
-using realesr-animevideov3 and writes clean high-bitrate H.264 MP4 replacements into
-hd_assets/videos/<name>.mp4, which runtime/win32_avi.c loads automatically in sync!
+Upscales every game_files/*.avi cutscene (mha2ih/il, mha2oh/ol, mha2sh/sl) on your GPU
+using realesr-animevideov3 and writes clean high-bitrate H.264 MP4 replacements (video
+only) into hd_assets/videos/<name>.mp4, which runtime/win32_avi.c loads automatically.
+The cutscene soundtrack is played by the game itself (g/snd/mha2?._snd in mha2.dat).
 
 Usage:
   python3 tools/upscale_videos.py                          # Upscale all 800x600 cutscenes 2x (1600x1200)

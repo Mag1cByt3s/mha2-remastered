@@ -203,14 +203,15 @@ static int g_last_bg_asset_id = -1;
 #include <sys/stat.h>
 #include <dirent.h>
 
-/* Rolling auto-save backup of game_files/mha2.sav save files on room transitions (throttled to 180s) */
+/* Rolling auto-save backup of <game dir>/mha2.sav save files on room transitions (throttled to 180s) */
 static void maybe_backup_savegames(void) {
     static uint32_t s_last_backup_ms = 0;
     uint32_t now = SDL_GetTicks();
     if (s_last_backup_ms != 0 && (now - s_last_backup_ms) < 180000u) return;
     s_last_backup_ms = now;
-    const char *src_dir = "game_files/mha2.sav";
-    const char *dst_dir = "game_files/mha2.sav/autosave_backup";
+    char src_dir[1100], dst_dir[1200];
+    snprintf(src_dir, sizeof(src_dir), "%s/mha2.sav", g_game_dir);
+    snprintf(dst_dir, sizeof(dst_dir), "%s/autosave_backup", src_dir);
     DIR *d = opendir(src_dir);
     if (!d) return;
     mkdir(dst_dir, 0755);
@@ -218,7 +219,7 @@ static void maybe_backup_savegames(void) {
     while ((ent = readdir(d)) != NULL) {
         size_t len = strlen(ent->d_name);
         if (len < 5 || strcasecmp(ent->d_name + len - 4, ".sav") != 0) continue;
-        char sp[512], dp[512];
+        char sp[1400], dp[1500];
         snprintf(sp, sizeof(sp), "%s/%s", src_dir, ent->d_name);
         snprintf(dp, sizeof(dp), "%s/%s", dst_dir, ent->d_name);
         FILE *fi = fopen(sp, "rb");

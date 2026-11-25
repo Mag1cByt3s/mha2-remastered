@@ -4,6 +4,18 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
+## [v5.5.4 — Savegame Backup Path, F1 Menu Footer & README Audit] (2026-11-25)
+
+### Fixes
+- **Rolling Savegame Backup Ignored `--game-dir`**: the backup copied from a hardcoded `game_files/mha2.sav` relative to the working directory, so installs with another game directory (split release in `~/.local/share/mha2-remastered/`, `--game-dir`) never got a backup. It now uses the real game directory (`<game dir>/mha2.sav/autosave_backup/`, `runtime/win32_ddraw.c`).
+- **F1 Menu Footer Cut Off**: the `4. CONTROLS` hint line was wider than the panel and lost its first and last characters; footer hints that do not fit are now scaled down to the panel width (`runtime/gl_menu.c`).
+- **`--help`**: lists `fsr` among the `--shader` choices and no longer calls the HD pack "PNG replacements".
+
+### Documentation
+- **README Audit (DE/EN)**: cutscenes are no longer described as "lip-synced" (the HD videos carry no audio; the game plays the soundtrack itself from `mha2.dat`), the F1 menu has four tabs (new showcase screenshot), the HD pack section documents the current `4x-ClearRealityV1` pipeline (`upscale_transformer.py`, `remaster_videos_4k.py`) plus cache invalidation, and missing features (post-FX options, quality-of-life functions, v5.2 game bugfixes, controller `RB`, font variables) were added.
+
+---
+
 ## [v5.5.3 — Widescreen Inventory Shows Whole Items] (2026-11-24)
 
 ### Fixes
@@ -151,7 +163,7 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
   - Converted all 8,644 HD PNGs to bit-exact lossless WebP (`lossless=True, exact=True`, `max_pixel_diff=0`, preserving dilated RGB inside transparent pixels) — saving **2.16 GB (38.2%)** with zero quality loss.
 - **Zero-Stutter Preloading & QoL Suite** (`runtime/hd_assets.c`, `runtime/gl_renderer.c`, `runtime/win32_ddraw.c`):
   - Added a background room-sprite pre-decoder worker thread + expanded GPU sprite LRU cache (`256 → 512` slots).
-  - Added **Dialog & Clue History Log (`L` key)** capturing recent multi-word dialog/clue lines into a scrollable overlay.
+  - Added **Dialog & Clue History Log (`L` key)** capturing the latest multi-word dialog/clue lines (up to 32) into an overlay.
   - Added **Rolling Auto-Save Backup** (`game_files/mha2.sav/autosave_backup/`, throttled every 3 min on room changes).
   - Added **Multi-Monitor Target Display Picker** in `F1` → `1. DISPLAY`.
 

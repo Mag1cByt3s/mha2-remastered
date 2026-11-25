@@ -14,7 +14,7 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
 
 > **Rechtlicher Hinweis / IP-Hinweis:** *Moorhuhn* / *Crazy Chicken* ist eine eingetragene Marke der ak tronic Software & Services GmbH. Dieses Repository enthält **ausschließlich** Clean-Room-Recompiler-Tooling, Asset-Extraktoren und eine native Linux-Kompatibilitätsschicht. Es sind keinerlei Original-Binärdateien, urheberrechtlich geschützte Spielinhalte oder aus der Exe generierter C-Code enthalten — du benötigst deine eigene legal erworbene Kopie des Spiels.
 >
-> Siehe [CHANGELOG.md](CHANGELOG.md) für den vollständigen Versionsverlauf von `v1` (erste statische Rekompilierung) bis `v5.3`.
+> Siehe [CHANGELOG.md](CHANGELOG.md) für den vollständigen Versionsverlauf von `v1` (erste statische Rekompilierung) bis zur aktuellen Version.
 
 <br>
 
@@ -50,9 +50,9 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
 
 <br>
 
-### Interaktives 3-Tab-Einstellungsmenü im Spiel (`F1`)
+### Interaktives 4-Tab-Einstellungsmenü im Spiel (`F1`)
 
-![Interaktives F1-Einstellungsmenü (Alle 3 Tabs)](docs/images/remaster_showcase_f1_menu.png)
+![Interaktives F1-Einstellungsmenü (alle 4 Tabs)](docs/images/remaster_showcase_f1_menu.png)
 
 <br>
 
@@ -78,40 +78,48 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
   - **16:9 Cinema (`800×450`)**: randloses 16:9-Gameplay mit transparenten On-Demand-Overlays oben & unten.
   - **4:3-Menüs**: seitenverhältnistreue Darstellung mit optionalen weichgezeichneten Ambient-Sidebars.
 
-- **Interaktives 3-Tab-Grafik- & Remaster-FX-Menü im Spiel (`F1`), Dialog-Log (`Strg+L`) & Clean-Room-Hauptmenü-Titel**:
-  - Per Maus und Tastatur bedienbares 3-Tab-Menü (`1. DISPLAY`, `2. POST-FX`, `3. ASSETS & TEXT`) für Auflösungs-Presets (`800×600`–`2560×1600`), Seitenverhältnis, Shader, Bloom, Color Grading, Silhouetten-AA, Vignette, Szenenübergänge, HD-Assets sowie Lautstärke/Hall/EQ — automatisch gespeichert in `mha2_settings.ini`.
-  - Enthält außerdem einen durchsuchbaren Dialog- & Hinweisverlauf (`Strg+L`), das kompakte `F3`-Performance-HUD sowie den prozedural in OpenGL/SDL2 gerenderten **3D-Goldschriftzug „REMASTERED“** im Hauptmenü (Clean-Room, aktiv im 4K-HD- sowie im Klassikmodus).
+- **Interaktives 4-Tab-Einstellungsmenü im Spiel (`F1`), Dialog-Log (`Strg+L`) & Clean-Room-Hauptmenü-Titel**:
+  - Per Maus, Tastatur und Controller bedienbares Menü mit vier Tabs (`1. DISPLAY`, `2. POST-FX`, `3. ASSETS & TEXT`, `4. CONTROLS`): Anzeigemodus & Zielmonitor, Auflösungs-Presets (`800×600`–`2560×1600`), Seitenverhältnis, Upscaling-Shader & CAS-Schärfe, VSync/FPS-Limit, Spieltempo (`1,0×` / `1,5×` / `2,0×`), Post-FX, HD-Assets, Schriftstil & Texthinterlegung, Overlay-Textgröße, Lautstärke/Hall/EQ und Tastenbelegung — automatisch gespeichert in `mha2_settings.ini`. Der Menütitel zeigt die installierte Version.
+  - Enthält außerdem einen Verlauf der letzten Dialog- & Hinweiszeilen (`Strg+L`, bis zu 32 Zeilen), das kompakte `F3`-Performance-HUD sowie den prozedural in OpenGL/SDL2 gerenderten **3D-Goldschriftzug „REMASTERED“** im Hauptmenü (Clean-Room, aktiv im 4K-HD- sowie im Klassikmodus).
 
 - **Multi-Pass OpenGL 3.3 FBO Post-Processing & weiche Szenen-Überblendungen**:
-  - **Emissiver Bloom** (`Off / Subtle / Medium / Rich`): Viertelauflösungs-`GL_RGBA16F`-Bright-Pass + zweifacher separabler 9-Tap-Gauß-Blur für Kerzen, Fackeln, Kronleuchter und Goldartefakte.
-  - **Color Grading & Vibrance** (`Original / Remastered Rich / Cinematic Warm / Crisp Daylight`).
-  - **Sprite-Silhouetten-AA & Anti-Banding-Dithering**: leichtes FXAA-Kantenglätten + Dreiecksrauschen-Dithering gegen Banding.
+  - **Emissiver Bloom** (`Off / Subtle / Medium / Rich`): Viertelauflösungs-`GL_RGBA16F`-Bright-Pass + separabler 9-Tap-Gauß-Blur für Kerzen, Fackeln, Kronleuchter und Goldartefakte.
+  - **Color Grading & Vibrance** (`Original / Remastered Rich / Cinematic Warm / Crisp Daylight`), **Filmisches HDR-Tone-Mapping** und **lokaler Kontrast (Clarity)** (je `0–100 %`), **Kino-Vignette** sowie **Living Atmosphere FX** (Fackelflackern & schwebender Staub).
+  - **Kantenglättung** (`FXAA 3.11` / `SMAA 1x` / `SMAA + 3× Edge AA`, Stärke `0–100 %`) und **großflächiges Debanding** mit Dreiecksrauschen-Dithering gegen Farbstufen.
   - **Weiche 210 ms Cubic-Ease-Out-Raumblenden**: Zero-Copy-Dual-FBO-Übergänge zwischen Räumen und Menüs.
 
-- **KI-4K-Hintergründe + native GPU-4×-RGBA-Sprites (`F6`)** ([runtime/hd_assets.c](runtime/hd_assets.c), [tools/upscale_ai.py](tools/upscale_ai.py)):
-  - Kombiniert 4K-Hintergründe (`3200×1800` / `3200×2400`) sowohl für Menüs (`800×600`) als auch für Spielräume (`800×450`) mit einem O(1)-dimensionsgruppierten LRU-GPU-Renderer für 4×-RGBA-Charaktere, Requisiten, Inventarsymbole, Buttons und Cursor (`hd_assets/sprites/`), inkl. Festplatten-Indexcache für sofortigen Start.
+- **Neuronale 4K-Hintergründe + 4×-RGBA-Sprites (`F6`)** ([runtime/hd_assets.c](runtime/hd_assets.c), [tools/upscale_transformer.py](tools/upscale_transformer.py)):
+  - 4K-Hintergründe (`3200×1800` / `3200×2400`, `4x-ClearRealityV1`) sowohl für Menüs (`800×600`) als auch für Spielräume (`800×450`), dazu 4×-RGBA-Charaktere, Requisiten, Inventarsymbole, Buttons und Cursor (`hd_assets/sprites/`), mehrteilige Animationsstreifen Bild für Bild hochskaliert. Verlustfreie WebP-Dateien, O(1)-dimensionsgruppierter LRU-GPU-Cache, Vorab-Dekodierung im Hintergrund und Festplatten-Indexcache für sofortigen Start; Widescreen-Hauptmenü mit erweiterten 4K-Seitenflügeln.
 
 - **Monitor-DPI-Vektortext & Untertitel (`F5`)** & **High-Refresh-Cursor (`F10`)**:
-  - Gestochen scharfer TrueType-Vektortext in nativer Monitor-Auflösung (nach dem Post-FX gerendert) sowie ein entkoppelter 4×-HD-Cursor mit voller Monitor-Bildwiederholrate (120/144/240 Hz).
+  - Gestochen scharfer TrueType-Vektortext in nativer Monitor-Auflösung (nach dem Post-FX gerendert, Schriftstil `Clean Sans` / `Adventure Serif`) sowie ein entkoppelter 4×-HD-Cursor mit voller Monitor-Bildwiederholrate (120/144/240 Hz).
 
 - **Echte 32-Bit-Farbtiefe (`Mode 888`), 7 Upscaling-Shader (inkl. AMD FidelityFX FSR 1.0) & 48-kHz-Audio-Mixer**:
-  - Bicubic+CAS, Lanczos3+CAS, Edge-Smooth, Bilinear, Nearest, Subtle CRT und AMD FidelityFX FSR 1.0 (`EASU + RCAS`); Float32-48-kHz-Catmull-Rom-Mixer mit Hall und Mastering-EQ (`F7`/`F8`/`F9`).
+  - Bicubic+CAS, Lanczos3+CAS, Edge-Smooth, Bilinear, Nearest, Subtle CRT und AMD FidelityFX FSR 1.0 (`EASU + RCAS`).
+  - Float32-48-kHz-Mixer mit Catmull-Rom-Resampling, knackfreien Lautstärkerampen, Burghall (`Subtle Castle` / `Rich Hall`) und Mastering-EQ mit Stereoverbreiterung (`Warm Remaster` / `Studio Crisp`) im `F1`-Menü; Lautstärke über `F7`/`F8`/`F9`.
 
-- **Remastered FMV-Zwischensequenzen** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/upscale_videos.py](tools/upscale_videos.py)):
-  - Echtzeit-GPU-Deblocking, Anti-Ringing und Schärfung für die 2005er Cinepak-AVIs sowie automatische lippensynchrone Wiedergabe optionaler HD-MP4/MKV-Cutscenes aus `hd_assets/videos/`.
+- **Remastered FMV-Zwischensequenzen** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/remaster_videos_4k.py](tools/remaster_videos_4k.py)):
+  - Echtzeit-GPU-Deblocking, Anti-Ringing und Schärfung für die Original-Videos von 2005 sowie automatischer Austausch durch optionale HD-Cutscenes (MP4/MKV/WebM, bis `3200×2400`) aus `hd_assets/videos/`. Der Ton kommt wie im Original aus dem Spiel, das Bild läuft im Takt der Echtzeit mit.
+
+- **Komfortfunktionen**:
+  - **Hotspot-Hervorhebung** (`Leertaste`/`H` halten): markiert alle anklickbaren Objekte direkt aus dem Szenengraphen des Spiels, auch in Räumen und Minispielen mit eigener Logik.
+  - **Schnelllauf** (`Umschalt` halten = `2×`, dauerhaft `1,5×`/`2,0×` im `F1`-Menü), **4K-Screenshots** (`Strg+P` / `Druck`), rollierende **Sicherungskopie der Spielstände** (`game_files/mha2.sav/autosave_backup/`, höchstens alle 3 Minuten bei Raumwechseln) und optionaler Desktop-Starter ([tools/install_desktop.sh](tools/install_desktop.sh)).
 
 - **Schnellspeichern & -laden (`Strg+S` / `Strg+O`, Controller: Steuerkreuz ↑/↓)**:
   - Steuert den originalen Speicherbildschirm des Spiels (originaler Speichercode, originale Vorschaubilder) in den festen Schnellspeicher-Slot 9; ein manueller Spielstand in Slot 9 wird nie überschrieben. Nur beim Erkunden eines Raums verfügbar (nicht in Zwischensequenzen, Dialogen oder Menüs).
 
 - **Frei belegbare Tasten & Controller (`F1` → `4. CONTROLS`) & Steam Deck** ([docs/STEAM_DECK.md](docs/STEAM_DECK.md)):
-  - Alle Remaster-Tastenkürzel mit je zwei Tastenkombinationen; Controller-Tasten über `pad_*` in `mha2_settings.ini`. Zusätzlich skalierbare Overlay-Texte (Dialogverlauf mit Zeilenumbruch, Hotspot-Beschriftungen, Hinweise; `100–200 %`).
+  - 18 Remaster-Aktionen mit je zwei Tastenkombinationen; Controller-Tasten über `pad_*` in `mha2_settings.ini`. Zusätzlich skalierbare Overlay-Texte (Dialogverlauf mit Zeilenumbruch, Hotspot-Beschriftungen, Hinweise; `100–200 %`).
 
-- **Behobene Fehler des Originalspiels & robuste Laufzeit**:
-  - Atomarer Ersatz für den in sieben `ObjMutex`-Methoden inline kopierten, nicht-atomaren Spinlock (inkl. erzwungenem Lock-Diebstahl), Absturz bei zufälliger Ambient-Variante ohne geladene Ressource (`0x0042a820`), Hotspot-Hervorhebung in 11 Raum- und 5 Minispiel-Unterklassen, Absturz bzw. unsichtbare Phantom-Knöpfe bei `Tab` nach dem Laden eines Spielstands (Fokus blieb auf dem geschlossenen Speicherbildschirm), korrekte x87-`FIST`/`#DE`-Semantik.
+- **Behobene Fehler des Originalspiels von 2005**:
+  - Atomarer Ersatz für den nicht-atomaren Spinlock, den MSVC in sieben `ObjMutex`-Methoden inline kopiert hat (inkl. erzwungenem Lock-Diebstahl nach 200 ms); Endlosschleife bei abgeschnittenen oder beschädigten Spielständen; künstliche 50–250-ms-Pause im Ladebildschirm; Absturz bei zufälliger Ambient-Variante ohne geladene Ressource (`0x0042a820`); Null-Zeiger-Zugriff im Raum-Objektlader; Handle-Leck beim Start; Absturz bzw. unsichtbare Phantom-Knöpfe bei `Tab` nach dem Laden eines Spielstands (Fokus blieb auf dem geschlossenen Speicherbildschirm).
+
+- **Robuste Laufzeit**:
+  - Exakte x86-/x87-Semantik (`FIST`, `div`/`idiv` mit `#DE`), abgesicherter 4-GiB-Gast-Adressraum, Windows-genaue Tastaturnachrichten (Pfeiltasten in den Szenen mit Tastatursteuerung).
   - Abstürze schreiben einen Bericht mit Gastadresse, Registern und Gast-Aufrufstapel nach `mha2_crash.log`; `--strict-mem` schützt die Gast-NULL-Seite zur Fehlersuche.
 
 - **Tests & Regressionen** ([docs/REPLAY.md](docs/REPLAY.md)):
-  - `make test` (Unit- & Stresstests) und `tools/regress.sh` (headless, in einer Sandbox ohne Zugriff auf echte Spielstände): skriptgesteuerte Eingabe-Wiedergabe (`--record` / `--replay`) durch Hauptmenü, Neues Spiel, Raumwechsel, Overlays, Schnellspeichern und Controller.
+  - `make test` (Unit- & Stresstests, Updater-Szenarien) und `tools/regress.sh` (headless, in einer Sandbox ohne Zugriff auf echte Spielstände): skriptgesteuerte Eingabe-Wiedergabe (`--record` / `--replay`) durch Hauptmenü, Neues Spiel, Raumwechsel, Overlays, Schnellspeichern und Controller.
 
 <br>
 
@@ -213,17 +221,32 @@ tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz 
 
 ## 4K-KI-HD-Asset-Pack erstellen (`hd_assets/`)
 
+Das aktuelle Paket nutzt das SPAN-Modell `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA-GPU empfohlen). Die Modelldatei legst du selbst unter `tools/models/sr/4x-ClearRealityV1.safetensors` ab.
+
 ```bash
-# 4K-Hintergründe + 4×-RGBA-Sprites per Vulkan-GPU generieren:
+M=tools/models/sr/4x-ClearRealityV1.safetensors
+# 4K-Hintergründe, Animationsstreifen (Bild für Bild) und alle IT3-Sprites:
+python3 tools/upscale_transformer.py --apply-backgrounds $M
+python3 tools/upscale_transformer.py --apply-jpeg-strips $M
+python3 tools/upscale_transformer.py --apply-sprites $M
+
+# Cursor glätten und alles verlustfrei nach WebP umwandeln:
+python3 tools/polish_cursors.py
+python3 tools/compress_hd_lossless.py hd_assets
+
+# Zwischensequenzen in 3200×2400 nach hd_assets/videos/ (legt auch die mha2?h.mp4-Verweise an):
+python3 tools/remaster_videos_4k.py
+
+# Alternative ohne PyTorch, per Vulkan (Real-ESRGAN, ältere Qualität):
 nix-shell --run "python3 tools/upscale_ai.py --all"
+nix-shell --run "python3 tools/upscale_videos.py --scale 4"
 
-# FMV-Zwischensequenzen (mha2il/ol/sl.avi) nach hd_assets/videos/ hochskalieren:
-nix-shell --run "python3 tools/upscale_videos.py --scale 2"
-
-# Oder originale 1×-Assets manuell inspizieren / extrahieren:
+# Originale 1×-Assets inspizieren / extrahieren:
 nix-shell --run "python3 tools/extract_assets.py --list"
 nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ```
+
+Nach Änderungen an `hd_assets/` die Indexdateien `hd_assets/.hd_index.cache` und `hd_assets/.hd_sprite_index.cache` löschen; das Spiel baut sie beim nächsten Start neu auf.
 
 <br>
 
@@ -242,6 +265,8 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ./play.sh --strict-mem                          # Debug: Gast-NULL-Zeiger-Zugriffe sofort melden
 ./play.sh --no-update                           # ohne Update-Prüfung starten
 ```
+
+Alle Optionen (Shader, VSync/FPS-Limit, Fenstergröße, Spiel- und HD-Verzeichnis …) listet `./mha2_linux --help`. Eigene Schriften lassen sich über `MHA2_FONT_PATH` (Oberfläche) und `MHA2_GAME_FONT_PATH` (Spieltext) setzen; ohne Angabe werden `fonts/DejaVu*.ttf` bzw. die DejaVu-Schriften des Systems genutzt.
 
 <br>
 
@@ -264,9 +289,9 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Umschalt** (`Shift`) | Gedrückt halten für 2× Schnelllauf-Geschwindigkeit |
 | **Strg+P** oder **Druck** | Sauberen 4K-PNG-Screenshot speichern (`screenshots/`) |
 | **Strg+S** / **Strg+O** | Schnellspeichern / Schnellladen (Slot 9) |
-| **Pfeiltasten** / **W A S D** | Moorhuhn in Szenen mit Tastatursteuerung lenken (Space-Invaders-Minispiel, dunkler Gang hinter dem zersägten Gitter) |
+| **Pfeiltasten** / **W A S D** | Steuerung in Szenen mit Tastatursteuerung (Space-Invaders-Minispiel, dunkler Gang hinter dem zersägten Gitter) |
 | **ESC** | Zwischensequenzen überspringen / Spielmenü / F1-Menü schließen |
-| **Controller** | Linker Stick = Cursor, A = Klick, B = Rechtsklick, X = Hotspots, Y/LB = Schnelllauf, Back = F1, Start = ESC, Steuerkreuz ↑/↓ = Schnellspeichern/-laden |
+| **Controller** | Linker Stick = Cursor, A = Klick, B = Rechtsklick, X = Hotspots, Y/LB = Schnelllauf, RB = Splitscreen-Vergleich, Back = F1, Start = ESC, Steuerkreuz ↑/↓ = Schnellspeichern/-laden |
 
 Alle Remaster-Tastenkürzel sind unter `F1` → `4. CONTROLS` frei belegbar (Standardwerte oben).
 
@@ -300,7 +325,7 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
 
 > **Legal / IP Notice:** *Moorhuhn* / *Crazy Chicken* is a registered trademark of ak tronic Software & Services GmbH. This repository contains **only** original clean-room recompiler tooling, asset extractors, and a Linux runtime compatibility layer. No original game binaries, copyrighted assets, or lifted C code are included — you must supply your own legally owned copy of the game.
 >
-> See [CHANGELOG.md](CHANGELOG.md) for the full version history from `v1` static recompilation through `v5.3`.
+> See [CHANGELOG.md](CHANGELOG.md) for the full version history from the `v1` static recompilation to the current release.
 
 <br>
 
@@ -336,9 +361,9 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
 
 <br>
 
-### Interactive 3-Tab In-Game Settings Menu (`F1`)
+### Interactive 4-Tab In-Game Settings Menu (`F1`)
 
-![Interactive F1 In-Game Settings Menu (All 3 Tabs)](docs/images/remaster_showcase_f1_menu.png)
+![Interactive F1 In-Game Settings Menu (all 4 tabs)](docs/images/remaster_showcase_f1_menu.png)
 
 <br>
 
@@ -364,40 +389,48 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
   - **16:9 Cinema (`800×450`)**: edge-to-edge 16:9 gameplay with transparent on-demand top & bottom overlays.
   - **4:3 Menus**: aspect-correct with optional blurred ambient sidebars.
 
-- **Interactive 3-Tab In-Game Settings Menu (`F1`), Dialog History Log (`Ctrl+L`) & Clean-Room Main Menu Title**:
-  - Mouse + keyboard 3-tab menu (`1. DISPLAY`, `2. POST-FX`, `3. ASSETS & TEXT`) controlling resolution presets (`800×600`–`2560×1600`), aspect mode, shaders, bloom, color grading, silhouette AA, vignette, transitions, HD assets, and volume/reverb/EQ — automatically saved to `mha2_settings.ini`.
-  - Also includes a `Ctrl+L` Dialog & Clue History Log, an `F3` live performance HUD, and a clean-room procedurally rendered **3D brushed-gold `"REMASTERED"`** Main Menu badge (active in both 4K HD and classic modes).
+- **Interactive 4-Tab In-Game Settings Menu (`F1`), Dialog History Log (`Ctrl+L`) & Clean-Room Main Menu Title**:
+  - Mouse, keyboard and controller menu with four tabs (`1. DISPLAY`, `2. POST-FX`, `3. ASSETS & TEXT`, `4. CONTROLS`): display mode & target monitor, resolution presets (`800×600`–`2560×1600`), aspect mode, upscaling shader & CAS sharpening, VSync/FPS cap, game speed (`1.0×` / `1.5×` / `2.0×`), post-FX, HD assets, font style & text backing, overlay text size, volume/reverb/EQ and key bindings — automatically saved to `mha2_settings.ini`. The menu title shows the installed version.
+  - Also includes a `Ctrl+L` history of the latest dialog & clue lines (up to 32), an `F3` live performance HUD, and a clean-room procedurally rendered **3D brushed-gold `"REMASTERED"`** Main Menu badge (active in both 4K HD and classic modes).
 
 - **Multi-Pass OpenGL 3.3 FBO Post-Processing & Smooth Scene Crossfades**:
-  - **Emissive Bloom** (`Off / Subtle / Medium / Rich`): quarter-res `GL_RGBA16F` warm-weighted bright-pass + dual separable 9-tap Gaussian blur for candles, torches, chandeliers, and gold artifacts.
-  - **Color Grading & Vibrance** (`Original / Remastered Rich / Cinematic Warm / Crisp Daylight`).
-  - **Sprite Silhouette AA & Anti-Banding Dithering**: lightweight FXAA edge smoothing + triangular-noise output dithering.
+  - **Emissive Bloom** (`Off / Subtle / Medium / Rich`): quarter-res `GL_RGBA16F` warm-weighted bright-pass + separable 9-tap Gaussian blur for candles, torches, chandeliers, and gold artifacts.
+  - **Color Grading & Vibrance** (`Original / Remastered Rich / Cinematic Warm / Crisp Daylight`), **Filmic HDR tone mapping** and **local contrast (clarity)** (each `0–100%`), **cinematic vignette**, and **Living Atmosphere FX** (torch flicker & drifting dust).
+  - **Anti-aliasing** (`FXAA 3.11` / `SMAA 1x` / `SMAA + 3× Edge AA`, strength `0–100%`) and **wide-radius debanding** with triangular-noise dithering.
   - **Smooth 210 ms Cubic Ease-Out Room Crossfades**: zero-copy dual-FBO transitions between rooms and menus.
 
-- **AI 4K Neural Backgrounds + Native GPU 4× RGBA Sprites (`F6`)** ([runtime/hd_assets.c](runtime/hd_assets.c), [tools/upscale_ai.py](tools/upscale_ai.py)):
-  - Composites 4K (`3200×1800` / `3200×2400`) Real-ESRGAN backgrounds for both menus (`800×600`) and gameplay rooms (`800×450`), plus an O(1) dimension-bucketed LRU GPU renderer for 4× RGBA foreground characters, props, inventory icons, buttons, and cursors (`hd_assets/sprites/`), all cached to disk for instant startup.
+- **Neural 4K Backgrounds + 4× RGBA Sprites (`F6`)** ([runtime/hd_assets.c](runtime/hd_assets.c), [tools/upscale_transformer.py](tools/upscale_transformer.py)):
+  - 4K (`3200×1800` / `3200×2400`, `4x-ClearRealityV1`) backgrounds for both menus (`800×600`) and gameplay rooms (`800×450`), plus 4× RGBA characters, props, inventory icons, buttons, and cursors (`hd_assets/sprites/`), with multi-frame animation strips upscaled frame by frame. Lossless WebP files, an O(1) dimension-bucketed LRU GPU cache, background pre-decoding and an on-disk index cache for instant startup; widescreen main menu with extended 4K side wings.
 
 - **Native Monitor-DPI Vector Text & Subtitles (`F5`)** & **High-Refresh Decoupled Cursor (`F10`)**:
-  - Crisp native monitor-DPI TrueType text rendered post-FX, plus a 4× HD decoupled cursor rendered at full monitor refresh rate (120/144/240Hz).
+  - Crisp native monitor-DPI TrueType text rendered post-FX (font style `Clean Sans` / `Adventure Serif`), plus a 4× HD decoupled cursor rendered at full monitor refresh rate (120/144/240Hz).
 
-- **True 32-bit Color (`Mode 888`), 7 Upscaling Shaders (incl. AMD FidelityFX FSR 1.0), & 48 kHz Cubic Audio Mixer**:
-  - Bicubic+CAS, Lanczos3+CAS, Edge-Smooth, Bilinear, Nearest, Subtle CRT, and AMD FidelityFX FSR 1.0 (`EASU + RCAS`); Float32 48 kHz Catmull-Rom audio mixer with reverb and mastering EQ (`F7`/`F8`/`F9`).
+- **True 32-bit Color (`Mode 888`), 7 Upscaling Shaders (incl. AMD FidelityFX FSR 1.0), & 48 kHz Audio Mixer**:
+  - Bicubic+CAS, Lanczos3+CAS, Edge-Smooth, Bilinear, Nearest, Subtle CRT, and AMD FidelityFX FSR 1.0 (`EASU + RCAS`).
+  - Float32 48 kHz mixer with Catmull-Rom resampling, pop-free gain ramps, castle reverb (`Subtle Castle` / `Rich Hall`) and mastering EQ with stereo widening (`Warm Remaster` / `Studio Crisp`) in the `F1` menu; volume on `F7`/`F8`/`F9`.
 
-- **Remastered FMV Cutscenes** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/upscale_videos.py](tools/upscale_videos.py)):
-  - Real-time GPU deblocking + anti-ringing + sharpening for 2005 Cinepak AVIs, plus automatic drop-in HD MP4/MKV cutscene playback from `hd_assets/videos/` in full audio sync.
+- **Remastered FMV Cutscenes** ([runtime/win32_avi.c](runtime/win32_avi.c), [tools/remaster_videos_4k.py](tools/remaster_videos_4k.py)):
+  - Real-time GPU deblocking + anti-ringing + sharpening for the original 2005 videos, plus automatic drop-in replacement by optional HD cutscenes (MP4/MKV/WebM, up to `3200×2400`) from `hd_assets/videos/`. As in the original, the game plays the soundtrack itself; the picture follows real time.
+
+- **Quality of Life**:
+  - **Hotspot highlighter** (hold `Space`/`H`): marks every clickable object straight from the game's scene graph, including rooms and minigames with custom logic.
+  - **Fast walk** (hold `Shift` = `2×`, permanent `1.5×`/`2.0×` in the `F1` menu), **4K screenshots** (`Ctrl+P` / `PrintScreen`), a rolling **savegame backup** (`game_files/mha2.sav/autosave_backup/`, at most every 3 minutes on room changes) and an optional desktop launcher ([tools/install_desktop.sh](tools/install_desktop.sh)).
 
 - **Quick Save & Quick Load (`Ctrl+S` / `Ctrl+O`, controller: D-pad Up/Down)**:
   - Drives the game's own save screen (original save code, original thumbnails) into the dedicated quick slot 9; a manual save in slot 9 is never overwritten. Available while exploring a room (not during cutscenes, dialogs or menus).
 
 - **Rebindable Keys & Controller (`F1` → `4. CONTROLS`) & Steam Deck** ([docs/STEAM_DECK.md](docs/STEAM_DECK.md)):
-  - Every remaster hotkey takes two key chords; controller buttons via `pad_*` in `mha2_settings.ini`. Plus scalable overlay text (word-wrapped dialog log, hotspot labels, toasts; `100–200%`).
+  - 18 remaster actions with two key chords each; controller buttons via `pad_*` in `mha2_settings.ini`. Plus scalable overlay text (word-wrapped dialog log, hotspot labels, toasts; `100–200%`).
 
-- **Original-Game Bugfixes & a Hardened Runtime**:
-  - Atomic replacement for the non-atomic spinlock MSVC inlined into seven `ObjMutex` methods (including its forced lock-steal), a crash when a random ambient variant is picked before any resource is loaded (`0x0042a820`), hotspot highlighting in 11 room and 5 minigame subclasses, a crash / invisible phantom buttons when pressing `Tab` after loading a game (focus stayed on the closed save screen), exact x87 `FIST` / `#DE` semantics.
+- **Original 2005 Game Bugfixes**:
+  - Atomic replacement for the non-atomic spinlock MSVC inlined into seven `ObjMutex` methods (including its forced lock-steal after 200 ms); an endless loop on truncated or corrupt savegames; an artificial 50–250 ms loading-screen stall; a crash when a random ambient variant is picked before any resource is loaded (`0x0042a820`); a NULL dereference in the room object loader; a startup handle leak; a crash / invisible phantom buttons when pressing `Tab` after loading a game (focus stayed on the closed save screen).
+
+- **Hardened Runtime**:
+  - Exact x86/x87 semantics (`FIST`, `div`/`idiv` with `#DE`), a guarded 4 GiB guest address space, Windows-accurate key messages (arrow keys in the keyboard-controlled scenes).
   - Crashes write a report with the guest address, registers and guest call stack to `mha2_crash.log`; `--strict-mem` protects the guest NULL page for debugging.
 
 - **Tests & Regressions** ([docs/REPLAY.md](docs/REPLAY.md)):
-  - `make test` (unit & stress tests) and `tools/regress.sh` (headless, sandboxed — real savegames are never touched): scripted input replay (`--record` / `--replay`) through the main menu, a new game, room transitions, overlays, quick save and controller input.
+  - `make test` (unit & stress tests, updater scenarios) and `tools/regress.sh` (headless, sandboxed — real savegames are never touched): scripted input replay (`--record` / `--replay`) through the main menu, a new game, room transitions, overlays, quick save and controller input.
 
 <br>
 
@@ -499,17 +532,32 @@ tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz 
 
 ## Building the 4K AI Neural HD Pack (`hd_assets/`)
 
+The current pack uses the SPAN model `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA GPU recommended). Put the model file at `tools/models/sr/4x-ClearRealityV1.safetensors` yourself.
+
 ```bash
-# Build 4K detail-preserving backgrounds (4x_NMKD-Siax_200k) + 4x RGBA sprites (ultrasharp-4x) on your Vulkan GPU:
+M=tools/models/sr/4x-ClearRealityV1.safetensors
+# 4K backgrounds, animation strips (frame by frame) and all IT3 sprites:
+python3 tools/upscale_transformer.py --apply-backgrounds $M
+python3 tools/upscale_transformer.py --apply-jpeg-strips $M
+python3 tools/upscale_transformer.py --apply-sprites $M
+
+# Smooth the cursors and convert everything to lossless WebP:
+python3 tools/polish_cursors.py
+python3 tools/compress_hd_lossless.py hd_assets
+
+# Cutscenes at 3200×2400 into hd_assets/videos/ (also creates the mha2?h.mp4 links):
+python3 tools/remaster_videos_4k.py
+
+# Alternative without PyTorch, via Vulkan (Real-ESRGAN, older quality):
 nix-shell --run "python3 tools/upscale_ai.py --all"
+nix-shell --run "python3 tools/upscale_videos.py --scale 4"
 
-# Remaster the FMV cutscenes (mha2il/ol/sl.avi) to 1600x1200 H.264 MP4 in hd_assets/videos/:
-nix-shell --run "python3 tools/upscale_videos.py --scale 2"
-
-# Or extract raw 1x assets manually:
+# Inspect / extract the original 1x assets:
 nix-shell --run "python3 tools/extract_assets.py --list"
 nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ```
+
+After changing `hd_assets/`, delete `hd_assets/.hd_index.cache` and `hd_assets/.hd_sprite_index.cache`; the game rebuilds them on the next start.
 
 <br>
 
@@ -528,6 +576,8 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 ./play.sh --strict-mem                          # debug: report guest NULL-pointer accesses immediately
 ./play.sh --no-update                           # start without the update check
 ```
+
+`./mha2_linux --help` lists every option (shader, VSync/FPS cap, window size, game and HD directories …). Custom fonts can be set via `MHA2_FONT_PATH` (UI) and `MHA2_GAME_FONT_PATH` (game text); otherwise `fonts/DejaVu*.ttf` or the system DejaVu fonts are used.
 
 <br>
 
@@ -550,9 +600,9 @@ nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
 | **Shift** | Hold for 2× fast-walk speed |
 | **Ctrl + P** or **PrintScreen** | Save clean 4K PNG screenshot (`screenshots/`) |
 | **Ctrl+S** / **Ctrl+O** | Quick save / quick load (slot 9) |
-| **Arrow keys** / **W A S D** | Steer the Moorhuhn in keyboard-controlled scenes (Space Invaders minigame, dark corridor behind the sawn grate) |
+| **Arrow keys** / **W A S D** | Control keyboard-driven scenes (Space Invaders minigame, dark corridor behind the sawn grate) |
 | **ESC** | Skip cutscenes / open game menu / close F1 menu |
-| **Controller** | Left stick = cursor, A = click, B = right click, X = hotspots, Y/LB = fast walk, Back = F1, Start = ESC, D-pad Up/Down = quick save/load |
+| **Controller** | Left stick = cursor, A = click, B = right click, X = hotspots, Y/LB = fast walk, RB = split-screen compare, Back = F1, Start = ESC, D-pad Up/Down = quick save/load |
 
 Every remaster hotkey can be rebound under `F1` → `4. CONTROLS` (defaults above).
 
