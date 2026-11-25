@@ -145,6 +145,8 @@ nix-shell --run "make lift && make -j$(nproc)"
 ./play.sh
 ```
 
+Mit Flakes geht es auch per `nix develop` (gleiche Umgebung wie `shell.nix`, nixpkgs über `flake.lock` festgelegt).
+
 <br>
 
 ### Standard-Linux (Ubuntu / Debian / Fedora / Arch)
@@ -221,9 +223,11 @@ tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz 
 
 ## 4K-KI-HD-Asset-Pack erstellen (`hd_assets/`)
 
-Das aktuelle Paket nutzt das SPAN-Modell `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA-GPU empfohlen). Die Modelldatei legst du selbst unter `tools/models/sr/4x-ClearRealityV1.safetensors` ab.
+Das HD-Paket ist optional und wird zum Spielen nicht gebraucht. Das aktuelle Paket nutzt das SPAN-Modell `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA-GPU empfohlen). Die Modelldatei legst du selbst unter `tools/models/sr/4x-ClearRealityV1.safetensors` ab. Alle nötigen Werkzeuge (PyTorch mit CUDA, `spandrel`, OpenCV, Pillow, FFmpeg, Real-ESRGAN) bringt eine eigene Nix-Umgebung mit. Sie ist getrennt von `shell.nix`, weil sie mehrere GB groß ist und unfreie CUDA-Pakete enthält:
 
 ```bash
+nix-shell nix/assets-shell.nix     # oder: nix develop .#assets
+
 M=tools/models/sr/4x-ClearRealityV1.safetensors
 # 4K-Hintergründe, Animationsstreifen (Bild für Bild) und alle IT3-Sprites:
 python3 tools/upscale_transformer.py --apply-backgrounds $M
@@ -238,12 +242,12 @@ python3 tools/compress_hd_lossless.py hd_assets
 python3 tools/remaster_videos_4k.py
 
 # Alternative ohne PyTorch, per Vulkan (Real-ESRGAN, ältere Qualität):
-nix-shell --run "python3 tools/upscale_ai.py --all"
-nix-shell --run "python3 tools/upscale_videos.py --scale 4"
+python3 tools/upscale_ai.py --all
+python3 tools/upscale_videos.py --scale 4
 
 # Originale 1×-Assets inspizieren / extrahieren:
-nix-shell --run "python3 tools/extract_assets.py --list"
-nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
+python3 tools/extract_assets.py --list
+python3 tools/extract_assets.py --images -o extracted_assets
 ```
 
 Nach Änderungen an `hd_assets/` die Indexdateien `hd_assets/.hd_index.cache` und `hd_assets/.hd_sprite_index.cache` löschen; das Spiel baut sie beim nächsten Start neu auf.
@@ -456,6 +460,8 @@ nix-shell --run "make lift && make -j$(nproc)"
 ./play.sh
 ```
 
+With flakes, `nix develop` gives the same environment as `shell.nix` (nixpkgs pinned by `flake.lock`).
+
 <br>
 
 ### Standard Linux (Ubuntu / Debian / Fedora / Arch)
@@ -532,9 +538,11 @@ tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz 
 
 ## Building the 4K AI Neural HD Pack (`hd_assets/`)
 
-The current pack uses the SPAN model `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA GPU recommended). Put the model file at `tools/models/sr/4x-ClearRealityV1.safetensors` yourself.
+The HD pack is optional and not needed to play. The current pack uses the SPAN model `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA GPU recommended). Put the model file at `tools/models/sr/4x-ClearRealityV1.safetensors` yourself. A separate Nix environment provides every tool (PyTorch with CUDA, `spandrel`, OpenCV, Pillow, FFmpeg, Real-ESRGAN). It is kept apart from `shell.nix` because it is several GB and contains unfree CUDA packages:
 
 ```bash
+nix-shell nix/assets-shell.nix     # or: nix develop .#assets
+
 M=tools/models/sr/4x-ClearRealityV1.safetensors
 # 4K backgrounds, animation strips (frame by frame) and all IT3 sprites:
 python3 tools/upscale_transformer.py --apply-backgrounds $M
@@ -549,12 +557,12 @@ python3 tools/compress_hd_lossless.py hd_assets
 python3 tools/remaster_videos_4k.py
 
 # Alternative without PyTorch, via Vulkan (Real-ESRGAN, older quality):
-nix-shell --run "python3 tools/upscale_ai.py --all"
-nix-shell --run "python3 tools/upscale_videos.py --scale 4"
+python3 tools/upscale_ai.py --all
+python3 tools/upscale_videos.py --scale 4
 
 # Inspect / extract the original 1x assets:
-nix-shell --run "python3 tools/extract_assets.py --list"
-nix-shell --run "python3 tools/extract_assets.py --images -o extracted_assets"
+python3 tools/extract_assets.py --list
+python3 tools/extract_assets.py --images -o extracted_assets
 ```
 
 After changing `hd_assets/`, delete `hd_assets/.hd_index.cache` and `hd_assets/.hd_sprite_index.cache`; the game rebuilds them on the next start.

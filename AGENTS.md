@@ -33,6 +33,8 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
   ```bash
   ./play.sh
   ```
+- **Flake:** `nix develop` = `shell.nix` (nixpkgs pinned in `flake.lock`); `nix develop .#assets` = `nix/assets-shell.nix`.
+- **HD asset tooling (`nix-shell nix/assets-shell.nix`):** PyTorch (`torch-bin`, CUDA, unfree), `spandrel` + `spandrel_extra_arches` (packaged from PyPI wheels there), OpenCV, Pillow, FFmpeg, `realesrgan-ncnn-vulkan`. Keep it out of `shell.nix`: `play.sh`/`tools/update.sh` enter `shell.nix` on every launch and players must never download CUDA/PyTorch.
 
 ### Standard Linux Build (Ubuntu / Debian / Fedora / Arch)
 - **Required packages:** `gcc`, `make`, `pkg-config`, `python3`, `python3-capstone`, and development headers for `SDL2` (`sdl2`), `SDL2_ttf`, `FFmpeg` (`libavformat`, `libavcodec`, `libswscale`, `libavutil`), and `OpenGL` (`gl`).
@@ -63,7 +65,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 ## 3. Repository & Architecture Map
 
 ### Root, Build & Documentation
-- `Makefile`, `shell.nix`: Build rules (`-MMD -MP`, `?= ` overrides) and NixOS shell environment (`MHA2_FONT_PATH`, `MHA2_GAME_FONT_PATH`, `python3` + `capstone`, SDL2, FFmpeg, GL, `dejavu_fonts`).
+- `Makefile`, `shell.nix`, `flake.nix`, `nix/assets-shell.nix`: Build rules (`-MMD -MP`, `?= ` overrides) and NixOS shell environment (`MHA2_FONT_PATH`, `MHA2_GAME_FONT_PATH`, `python3` + `capstone`, SDL2, FFmpeg, GL, `dejavu_fonts`).
 - `play.sh`: Universal launcher (any distro; `nix-shell` when available): runs `tools/update.sh`, then `./mha2_linux` with all arguments (`--no-update` is consumed); passes the update notice via `MHA2_UPDATE_NOTICE`.
 - `LICENSE`, `README.md`, `CHANGELOG.md`, `docs/images/`: MIT License (clean-room code/tooling only), bilingual README (**German `#deutsch` first, clickable English `#english` below**), `v1`–`v5.4` changelog, `1280×640` repo banner (`docs/images/banner.png`), and showcase screenshots (`remaster_showcase_*.png`).
 
