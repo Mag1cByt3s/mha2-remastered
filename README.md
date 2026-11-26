@@ -62,6 +62,12 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
 
 <br>
 
+### Lesehilfe für Bücher & Briefe (`Leertaste`) & Lupe (`Tab`)
+
+![Buchseite im Spiel, Lesehilfe mit klarem Text und Lupe auf die 4K-Seite](docs/images/remaster_showcase_page_reader_de.png)
+
+<br>
+
 ---
 
 <br>
@@ -384,6 +390,12 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
 ### In-Game Dialog & Clue History Log (`Ctrl+L`) & Live Stats HUD (`F3`)
 
 ![In-Game Dialog & Clue History Log (Ctrl+L) with F3 Stats HUD](docs/images/remaster_showcase_dialog_log.png)
+
+<br>
+
+### Book & Letter Reader (`Space`) & Magnifier (`Tab`)
+
+![Book page in game, reader with crisp text and magnifier on the 4K page](docs/images/remaster_showcase_page_reader.png)
 
 <br>
 
