@@ -34,7 +34,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
   ./play.sh
   ```
 - **Flake:** `nix develop` = `shell.nix` (nixpkgs pinned in `flake.lock`); `nix develop .#assets` = `nix/assets-shell.nix`.
-- **HD asset tooling (`nix-shell nix/assets-shell.nix`):** PyTorch (`torch-bin`, CUDA, unfree), `spandrel` + `spandrel_extra_arches` (packaged from PyPI wheels there), OpenCV, Pillow, FFmpeg, `realesrgan-ncnn-vulkan`. Keep it out of `shell.nix`: `play.sh`/`tools/update.sh` enter `shell.nix` on every launch and players must never download CUDA/PyTorch.
+- **HD asset tooling (`nix-shell nix/assets-shell.nix`):** PyTorch (`torch-bin`, CUDA, unfree), `spandrel` + `spandrel_extra_arches` (packaged from PyPI wheels there), OpenCV, Pillow, FFmpeg, `realesrgan-ncnn-vulkan`, `transformers` (page-text OCR models). Keep it out of `shell.nix`: `play.sh`/`tools/update.sh` enter `shell.nix` on every launch and players must never download CUDA/PyTorch.
 
 ### Standard Linux Build (Ubuntu / Debian / Fedora / Arch)
 - **Required packages:** `gcc`, `make`, `pkg-config`, `python3`, `python3-capstone`, and development headers for `SDL2` (`sdl2`), `SDL2_ttf`, `FFmpeg` (`libavformat`, `libavcodec`, `libswscale`, `libavutil`), and `OpenGL` (`gl`).
@@ -91,13 +91,14 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 - `runtime/win32_user_gdi.c`: SDL2 window/event loop, focus-loss QoL reset (`clear_held_qol_keys()`), input state, atomic audio hotkey updates (`F7`/`F8`/`F9`), GDI font/TextOutA hooking (Windows-1252 → UTF-8, `find_system_ttf()`), gamepad cursor emulation.
 - `runtime/win32_dinput.c`: DirectInput keyboard/mouse COM stubs (`com_dinput_dispatch`).
 - `runtime/win32_dsound.c`: DirectSound mixing + SDL2 audio callback + reverb/EQ DSP (reads shared `g_cfg` audio fields atomically).
-- `runtime/gl_shaders.c` (GLSL sources), `runtime/gl_menu.c` (`F1` menu, 4 tabs incl. `4. CONTROLS` key capture), `runtime/gl_dialog_log.c` (`Ctrl+L` log, `gl_dialog_log_shutdown()`), `runtime/gl_internal.h` (private renderer interface — never include outside `runtime/gl_*.c`).
+- `runtime/gl_shaders.c` (GLSL sources), `runtime/gl_menu.c` (`F1` menu, 4 tabs incl. `4. CONTROLS` key capture), `runtime/gl_dialog_log.c` (`Ctrl+L` log, `gl_dialog_log_shutdown()`), `runtime/gl_page_reader.c` (book/letter reader: `<hd bg stem>.txt` next to the active HD background via `ddraw_active_bg_asset()`, opened by the `ACT_HOTSPOTS` key on such pages, `gl_page_reader_shutdown()`), `runtime/gl_internal.h` (private renderer interface — never include outside `runtime/gl_*.c`).
 - `runtime/win32_avi.c`: FFmpeg-backed DirectShow (`IGraphBuilder`/`IMediaControl`/`IMediaEventEx`/`IVideoWindow`/`IBasicVideo`) & `AVIFIL32`/`DrawDibDraw` video playback with `Pause`/`Run` elapsed-clock preservation (`paused_elapsed`), bounded codec error/flush loops (`ff_decode_next_frame()`), guest bounds checks, and automatic `hd_assets/videos/*.mp4` 4K override.
 
 ### Tooling (`tools/`)
 - `tools/Containerfile.portable`, `tools/package_portable_linux.sh`: Self-contained Ubuntu 22.04 portable Linux builder & packager.
 - `tools/extract_game.py`, `tools/extract_assets.py`: Legal-copy installer/disc extractor (`Setup.EXE`, Mode-1/2352 `.bin`/`.iso`) and `mha2.dat` VDrv/`_img`/IT3 unpacker.
-- `tools/upscale_ai.py`, `tools/upscale_transformer.py`, `tools/upscale_alpha_sprites.py`: Real-ESRGAN Vulkan batch 4× builder, faithful Transformer/SPAN (`4x-ClearRealityV1`) 4× upscaler (`--apply-backgrounds`, `--apply-sprites`, `--apply-jpeg-strips`), and composited IT3 `tbl1+tbl2` RGBA upscaler.
+- `tools/upscale_ai.py`, `tools/upscale_transformer.py`, `tools/upscale_alpha_sprites.py`: Real-ESRGAN Vulkan batch 4× builder, faithful Transformer/SPAN (`4x-ClearRealityV1`) 4× upscaler (`--apply-backgrounds`, `--apply-sprites`, `--apply-jpeg-strips`, `--apply-text-screens` = FBCNN JPEG deblock → 4× for the readable close-ups in `TEXT_SCREENS`; rerun it after `--apply-backgrounds`), and composited IT3 `tbl1+tbl2` RGBA upscaler.
+- `tools/text_screens.py`, `tools/extract_page_text.py`: readable close-ups (`TEXT_SCREENS`, `NO_READER`, measured `PAGE_BOXES` split at the gutter) and their page text: PaddleOCR-VL + Qwen3-VL-4B + GLM-OCR (one model per family; same-family models share errors) vote word by word, a word needs ≥ 2 families and a lead of one; a screen gets `hd_assets/<stem>.txt` only if every word passes, otherwise an empty file (= zoom view only). Text files are never overwritten without `--force`.
 - `tools/remaster_bg_diffusion.py`: Experimental SDXL + ControlNet-Tile 4K background remaster tool.
 - `tools/upscale_videos.py`, `tools/remaster_videos_4k.py`: Cutscene upscalers (`game_files/*.avi` → `hd_assets/videos/*.mp4` via Real-ESRGAN Video or streaming RTX `4x-ClearRealityV1` pipeline).
 - `tools/polish_cursors.py`, `tools/compress_hd_lossless.py`: SDF vector-clean cursor polisher (`cu*` & `mc*`, reading `.bak_raw` backups for idempotency) and parallel bit-exact lossless WebP recompressor.
@@ -177,9 +178,11 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
 
 13. **Key Messages (`runtime/win32_user_gdi.c`):** `WM_KEYDOWN`/`WM_KEYUP` `lParam` must stay Windows-accurate (`sdl_key_lparam()`: scan code + extended bit 24 for the cursor/navigation block). The game builds key codes as `vk | 0x10000 | (lParam & 0x01000000)`; cursor-key scenes bind the arrows only with bit 24 set, while GUI code masks it off (`& 0xfeffffff` / `& 0xffffff`).
 
-14. **Hotkeys (`runtime/input_bindings.c`):** all remaster hotkeys go through `bindings_match_key()`/`perform_action()`; Escape, Alt+F4, Alt+Enter and pad A/B/Start stay fixed. Press chords require exact Ctrl/Alt so plain letters typed into savegame names never trigger actions. UI hints use `bindings_describe()`.
+14. **Page reader (`runtime/gl_page_reader.c`, `runtime/win32_user_gdi.c`):** the hotspot key opens the reader only when the active full-screen background has a `.txt` (empty file = zoom view only; `Tab` switches text/zoom, zoom view uses the cached 4K background texture `gl_bg_texture()`); while open it swallows all input, and the release belonging to the press that opened/closed it (`reader_toggle_from_event()`) is swallowed too, so the game never sees unpaired key/button ups. Replay `click`/`clickspot` call `win32_input_mouse_button()` directly and bypass it. Page texts are copyrighted game text: generated locally into `hd_assets/`, never in the repo or a published release.
 
-15. **Updater & Player Data (`tools/update.sh`, `play.sh`):**
+15. **Hotkeys (`runtime/input_bindings.c`):** all remaster hotkeys go through `bindings_match_key()`/`perform_action()`; Escape, Alt+F4, Alt+Enter and pad A/B/Start stay fixed. Press chords require exact Ctrl/Alt so plain letters typed into savegame names never trigger actions. UI hints use `bindings_describe()`.
+
+16. **Updater & Player Data (`tools/update.sh`, `play.sh`):**
     - Players' installs are git checkouts updated to the newest **release tag** (`vMAJOR.MINOR[.PATCH]`; other tag styles are ignored). Untagged commits on `main` never reach players.
     - Everything a player owns must stay gitignored (`game_files/` incl. `mha2.sav/`, `mha2_settings.ini`, `hd_assets/`, `backups/`); never move player data into tracked paths and never add tracked files the game writes at runtime.
     - Keep both scripts wrapped in `main "$@"; exit $?` (git may rewrite them while they run). `tools/update.sh` prints nothing on stdout except the in-game notice line. Persist new ini keys in `gl_config_load/save()`, otherwise the game drops them on the next settings save (cf. `auto_update`).
@@ -214,7 +217,7 @@ Players' `./play.sh` installs the tag on their next launch. Never move or delete
 
 ### Refreshing HD Caches or Portable Release Bundles
 - If modifying files under `hd_assets/`, delete `.hd_index.cache` and/or `.hd_sprite_index.cache` so the runtime rebuilds the indexes cleanly.
-- To ship or test a cross-distro release after code edits, run `bash tools/package_portable_linux.sh --split` (runtime + HD asset pack, no game files; `--no-archive` for fast ABI/font checks).
+- To ship or test a cross-distro release after code edits, run `bash tools/package_portable_linux.sh --split` (runtime archive, no game files; `--no-archive` for fast ABI/font checks). Only the runtime archive may ever be shared: the HD pack (and the HD tar `--split` also writes) is game-derived and is never published — players build it themselves.
 
 ---
 

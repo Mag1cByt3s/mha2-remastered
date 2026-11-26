@@ -1348,6 +1348,11 @@ int gl_renderer_init(const char *title, int w, int h) {
                             gl_bloom_name(g_cfg.bloom_level),
                             gl_grade_name(g_cfg.color_grade),
                             hd_assets_count(), hd_sprites_count());
+                    int log_ww = 0, log_wh = 0, log_dw = 0, log_dh = 0;
+                    SDL_GetWindowSize(g_sdl_window, &log_ww, &log_wh);
+                    SDL_GL_GetDrawableSize(g_sdl_window, &log_dw, &log_dh);
+                    fprintf(stderr, "[GL] Video driver %s, window %dx%d, drawable %dx%d\n",
+                            vdrv ? vdrv : "?", log_ww, log_wh, log_dw, log_dh);
                     gl_renderer_show_toast("Remastered v5 | Press F1 for Graphics & Remaster FX Menu | F11:Fullscreen | F12:Aspect");
                     return 1;
                 }
@@ -1401,6 +1406,7 @@ void gl_renderer_shutdown(void) {
     destroy_post_fbos();
     gl_menu_shutdown();
     gl_dialog_log_shutdown();
+    gl_page_reader_shutdown();
     if (g_hud_tex) { glDeleteTextures(1, &g_hud_tex); g_hud_tex = 0; }
     if (g_toast_tex) { glDeleteTextures(1, &g_toast_tex); g_toast_tex = 0; }
     if (g_frame_tex) { glDeleteTextures(1, &g_frame_tex); g_frame_tex = 0; }
@@ -1610,6 +1616,16 @@ static BgTexEntry *bg_cache_acquire(int asset_id) {
         gl_renderer_show_toast("HD Background: %s (%dx%d)", hd_assets_get_name(asset_id), victim->hd_w, victim->hd_h);
     }
     return victim;
+}
+
+/* Full-resolution GPU texture of an HD background (page reader zoom view). GL thread only. */
+GLuint gl_bg_texture(int asset_id, int *w, int *h) {
+    if (asset_id < 0) return 0;
+    BgTexEntry *e = bg_cache_acquire(asset_id);
+    if (!e) return 0;
+    *w = e->hd_w;
+    *h = e->hd_h;
+    return e->hd_tex;
 }
 
 /* ---- HD Background Activation (supports both 800x600 menus and 800x450 rooms!) ---- */
@@ -2644,9 +2660,9 @@ void gl_window_to_game_coords(int win_x, int win_y, int *out_gx, int *out_gy) {
     *out_gy = (int)(fy + 0.5f);
 }
 
-static void draw_osd_quad_uv(GLuint tex, float x_px, float y_px, float w_px, float h_px,
-                             float u0, float v0, float u1, float v1,
-                             int draw_w, int draw_h, float alpha) {
+void draw_osd_quad_uv(GLuint tex, float x_px, float y_px, float w_px, float h_px,
+                      float u0, float v0, float u1, float v1,
+                      int draw_w, int draw_h, float alpha) {
     if (!tex || draw_w <= 0 || draw_h <= 0) return;
     float x0 = (2.0f * x_px / (float)draw_w) - 1.0f;
     float x1 = (2.0f * (x_px + w_px) / (float)draw_w) - 1.0f;
@@ -3199,11 +3215,14 @@ static void gl_draw_frame_common(int src_w, int src_h, int src_bpp) {
                       g_toast_w, g_toast_h, draw_w, draw_h, alpha);
     }
 
-    /* ---- Pass 7: Interactive Graphics Menu (F1) & Dialog History Log (L) ---- */
+    /* ---- Pass 7: Interactive Graphics Menu (F1), Dialog History Log (L), Page Reader ---- */
+    gl_page_reader_poll();
     if (gl_menu_is_open()) {
         gl_menu_draw(draw_w, draw_h);
     } else if (gl_renderer_is_dialog_log_open()) {
         gl_dialog_log_draw(draw_w, draw_h);
+    } else if (gl_renderer_is_page_reader_open()) {
+        gl_page_reader_draw(draw_w, draw_h);
     }
 
     /* Full composited frame incl. overlays/HUD/menus (replay `shotfull`) */

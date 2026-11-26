@@ -271,5 +271,13 @@ void  gl_renderer_request_screenshot_to(const char *path, int full_frame);
 void  gl_renderer_log_dialog(const char *utf8);
 void  gl_renderer_toggle_dialog_log(void);
 int   gl_renderer_is_dialog_log_open(void);
+/* Page reader (runtime/gl_page_reader.c): text box for the current book/letter close-up */
+int   gl_renderer_page_reader_available(void);  /* the active background has page text */
+void  gl_renderer_toggle_page_reader(void);
+int   gl_renderer_is_page_reader_open(void);
+int   gl_renderer_page_reader_zoom_mode(void);     /* open and showing the zoom view */
+void  gl_renderer_page_reader_switch_view(void);   /* text box <-> zoom view */
+void  gl_renderer_page_reader_zoom(int steps);      /* +in / -out, 1.25x per step */
+void  gl_renderer_page_reader_pan(float x, float y, int relative);  /* 0..1 / step */
 
 #endif /* MHA2_GL_RENDERER_H */

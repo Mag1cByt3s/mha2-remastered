@@ -22,6 +22,7 @@ spandrel_extra_arches.install()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from extract_assets import Mha2Archive, decode_it3_frame
 from upscale_alpha_sprites import composite_frame, dilate_rgb
+from text_screens import TEXT_SCREENS
 
 
 def load_sr_model(model_path: str, device: str = "cuda"):
@@ -137,6 +138,16 @@ def upscale_fast(desc, arr_u8: np.ndarray, device: str = "cuda") -> np.ndarray:
     return np.asarray(upscale_tiled(desc, Image.fromarray(arr_u8, "RGB"), tile=256, overlap=32, device=device))
 
 
+def deblock_and_upscale(deblock, sr, img: Image.Image, device: str) -> Image.Image:
+    """1x JPEG artifact removal followed by the 4x model (text screens).
+
+    The 2005 JPEGs carry heavy 8x8 block artifacts around every glyph which a 4x model
+    sharpens into boxes and wobbly strokes, so the readable close-ups are deblocked first.
+    """
+    clean = upscale_tiled(deblock, img, tile=256, overlap=32, device=device)
+    return upscale_tiled(sr, clean, tile=256, overlap=32, device=device)
+
+
 def find_hd_asset(stem: str) -> str:
     for ext in (".webp", ".png"):
         p = stem + ext
@@ -152,6 +163,11 @@ def main():
     ap.add_argument("--apply-jpeg-strips", metavar="MODEL_PATH",
                     help="Split & 4x-upscale all 50 multi-frame JPEG vertical strips into per-frame lossless WebPs in hd_assets/sprites/")
     ap.add_argument("--apply-sprites", metavar="MODEL_PATH", help="Batch-upscale ALL ~8,297 IT3 sprites (tbl2 + non-tbl2 + opaque)")
+    ap.add_argument("--apply-text-screens", metavar="MODEL_PATH",
+                    help="Re-upscale only the readable book/letter/map close-ups (TEXT_SCREENS): "
+                         "JPEG deblock with --deblock-model, then 4x with MODEL_PATH")
+    ap.add_argument("--deblock-model", default="tools/models/sr/fbcnn_color.pth",
+                    help="1x JPEG artifact removal model for --apply-text-screens (default: FBCNN color)")
     ap.add_argument("--out-dir", default="work/sr_samples")
     args = ap.parse_args()
 
@@ -245,6 +261,26 @@ def main():
         if os.path.exists(bg_cache):
             os.remove(bg_cache)
         print(f"[done] Remastered {count} backgrounds in {time.time() - t_all:.1f}s (index cache cleared)", flush=True)
+
+    elif args.apply_text_screens:
+        deblock = load_sr_model(args.deblock_model, device)
+        sr = load_sr_model(args.apply_text_screens, device)
+        t_all = time.time()
+        for stem in TEXT_SCREENS:
+            up = deblock_and_upscale(deblock, sr, extract_raw_bg(arc, stem + "._img"), device)
+            out_path = os.path.join("hd_assets", stem + ".webp")
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            up.save(out_path, "WEBP", lossless=True, exact=True, method=4)
+            stale_png = os.path.join("hd_assets", stem + ".png")
+            if os.path.exists(stale_png):
+                os.remove(stale_png)
+            print(f"  [text] {out_path} ({up.size})", flush=True)
+        arc.close()
+        bg_cache = os.path.join("hd_assets", ".hd_index.cache")
+        if os.path.exists(bg_cache):
+            os.remove(bg_cache)
+        print(f"[done] Remastered {len(TEXT_SCREENS)} text screens in {time.time() - t_all:.1f}s "
+              f"(index cache cleared)", flush=True)
 
     elif args.apply_jpeg_strips:
         desc = load_sr_model(args.apply_jpeg_strips, device)

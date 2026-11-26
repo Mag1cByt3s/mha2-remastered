@@ -119,6 +119,8 @@ void ddraw_surface_add_text(DDrawSurface *s, const GlTextDraw *td);
 void ddraw_present_surface(DDrawSurface *surf);
 uint64_t ddraw_last_frame_hash(uint32_t *out_w, uint32_t *out_h);
 void ddraw_present_rgb24(const uint8_t *rgb, int w, int h, int stride);
+/* HD asset id of the current full-screen background (-1: none / not matched) */
+int  ddraw_active_bg_asset(void);
 void ddraw_install_rle_hooks(void);
 void game_patches_install(void);
 

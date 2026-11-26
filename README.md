@@ -103,6 +103,7 @@ Ein vollständiger **eigenständiger x86-32-zu-Linux-x86_64 Static Recompiler** 
 
 - **Komfortfunktionen**:
   - **Hotspot-Hervorhebung** (`Leertaste`/`H` halten): markiert alle anklickbaren Objekte direkt aus dem Szenengraphen des Spiels, auch in Räumen und Minispielen mit eigener Logik.
+  - **Lesehilfe für Bücher & Briefe** (`Leertaste`/`H` auf einer Buchseite, Controller: X) ([runtime/gl_page_reader.c](runtime/gl_page_reader.c)): zeigt den Text von Tagebüchern, Pergamenten, Grabinschrift und Aushängen als klare, skalierbare Schrift über der abgedunkelten Seite, Doppelseiten zweispaltig. `Tab` wechselt zur **Lupe**: die 4K-Seite vergrößert, schwenkbar mit Maus/Pfeiltasten, Zoom mit Mausrad/`+`/`-`. Schließen mit derselben Taste, `Esc` oder Klick. Die Texte werden beim Bau des HD-Pakets lokal aus den eigenen Spieldateien gelesen (`hd_assets/…/*.txt`, nie im Repository); Seiten, bei denen die Texterkennung nicht sicher ist, öffnen direkt die Lupe.
   - **Schnelllauf** (`Umschalt` halten = `2×`, dauerhaft `1,5×`/`2,0×` im `F1`-Menü), **4K-Screenshots** (`Strg+P` / `Druck`), rollierende **Sicherungskopie der Spielstände** (`game_files/mha2.sav/autosave_backup/`, höchstens alle 3 Minuten bei Raumwechseln) und optionaler Desktop-Starter ([tools/install_desktop.sh](tools/install_desktop.sh)).
 
 - **Schnellspeichern & -laden (`Strg+S` / `Strg+O`, Controller: Steuerkreuz ↑/↓)**:
@@ -188,7 +189,7 @@ Erstellt ein eigenständiges, distributionsübergreifendes `.tar.gz`-Bundle übe
 ```bash
 make lift
 bash tools/package_portable_linux.sh            # Komplettpaket (persönliche Nutzung)
-bash tools/package_portable_linux.sh --split    # kleines Runtime-Paket + separates HD-Asset-Paket, ohne Spieldateien
+bash tools/package_portable_linux.sh --split    # kleines Runtime-Paket ohne Spieldateien (+ Tar des eigenen hd_assets/, nur privat)
 ```
 
 Installation des geteilten Releases (eigene Spieldateien, gemeinsames Datenverzeichnis `~/.local/share/mha2-remastered/`): [docs/INSTALL.md](docs/INSTALL.md).
@@ -212,7 +213,7 @@ tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz 
 ```
 
 - Ersetzt werden nur Programmdateien (`mha2_linux`, `lib/`, `fonts/`, `PLAY.sh`, Doku). **Spielstände (`game_files/mha2.sav/`), `mha2_settings.ini`, Spieldateien, Screenshots und `hd_assets/` bleiben unverändert** – das Archiv enthält keine dieser Dateien.
-- Das funktioniert auch für ältere Komplett-Bundles (Spieldateien + HD-Assets in einem Archiv). Das 5-GB-HD-Asset-Paket muss nur erneut entpackt werden (`tar -xf …_HD_Assets.tar --strip-components=1 -C .`), wenn sich die HD-Assets geändert haben.
+- Das funktioniert auch für ältere Komplett-Bundles (Spieldateien + HD-Assets in einem Archiv). Das HD-Asset-Paket ist nie Teil eines Releases; es wird selbst gebaut (siehe *4K-KI-HD-Asset-Pack erstellen*) und bleibt bei Updates unverändert.
 - Wer automatische Updates möchte, installiert stattdessen per `git clone` (siehe *Automatische Updates*); Spielstände lassen sich übernehmen, indem `game_files/mha2.sav/` und `mha2_settings.ini` in die neue Installation kopiert werden.
 
 <br>
@@ -223,7 +224,7 @@ tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz 
 
 ## 4K-KI-HD-Asset-Pack erstellen (`hd_assets/`)
 
-Das HD-Paket ist optional und wird zum Spielen nicht gebraucht. Das aktuelle Paket nutzt das SPAN-Modell `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA-GPU empfohlen). Die Modelldatei legst du selbst unter `tools/models/sr/4x-ClearRealityV1.safetensors` ab. Alle nötigen Werkzeuge (PyTorch mit CUDA, `spandrel`, OpenCV, Pillow, FFmpeg, Real-ESRGAN) bringt eine eigene Nix-Umgebung mit. Sie ist getrennt von `shell.nix`, weil sie mehrere GB groß ist und unfreie CUDA-Pakete enthält:
+Das HD-Paket ist optional und wird zum Spielen nicht gebraucht. **Es wird nicht verteilt:** alle 4K-Bilder, Sprites, Videos und Seitentexte stammen aus der urheberrechtlich geschützten Originalgrafik. Deshalb baut es jede:r selbst aus der eigenen Spielkopie in `game_files/` (NVIDIA-GPU mit CUDA, ca. 17 GB freier Speicher: Paket ~5 GB, Upscaling-Modelle ~0,7 GB, Texterkennungs-Modelle ~11 GB in `~/.cache/huggingface`, danach löschbar). Ohne HD-Paket läuft das Spiel in der Originalgrafik von 2005 mit allen Engine-Funktionen. Das aktuelle Paket nutzt das SPAN-Modell `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA-GPU empfohlen). Die Modelldatei legst du selbst unter `tools/models/sr/4x-ClearRealityV1.safetensors` ab. Alle nötigen Werkzeuge (PyTorch mit CUDA, `spandrel`, OpenCV, Pillow, FFmpeg, Real-ESRGAN) bringt eine eigene Nix-Umgebung mit. Sie ist getrennt von `shell.nix`, weil sie mehrere GB groß ist und unfreie CUDA-Pakete enthält:
 
 ```bash
 nix-shell nix/assets-shell.nix     # oder: nix develop .#assets
@@ -233,6 +234,13 @@ M=tools/models/sr/4x-ClearRealityV1.safetensors
 python3 tools/upscale_transformer.py --apply-backgrounds $M
 python3 tools/upscale_transformer.py --apply-jpeg-strips $M
 python3 tools/upscale_transformer.py --apply-sprites $M
+# Lesbare Nahaufnahmen (Buchseiten, Briefe, Karte) nach --apply-backgrounds neu: erst JPEG-Blockartefakte
+# entfernen (FBCNN, https://github.com/jiaxi-jiang/FBCNN/releases/download/v1.0/fbcnn_color.pth
+# nach tools/models/sr/), dann 4×, damit die Schrift nicht in Kästchen zerfällt:
+python3 tools/upscale_transformer.py --apply-text-screens $M
+# Seitentexte für die Lesehilfe: drei OCR-Modelle (PaddleOCR-VL, Qwen3-VL-4B, GLM-OCR, ~11 GB Download)
+# lesen jede Seite, Text gibt es nur bei klarer Mehrheit für jedes Wort, sonst nur die Lupe:
+python3 tools/extract_page_text.py
 
 # Cursor glätten und alles verlustfrei nach WebP umwandeln:
 python3 tools/polish_cursors.py
@@ -251,6 +259,8 @@ python3 tools/extract_assets.py --images -o extracted_assets
 ```
 
 Nach Änderungen an `hd_assets/` die Indexdateien `hd_assets/.hd_index.cache` und `hd_assets/.hd_sprite_index.cache` löschen; das Spiel baut sie beim nächsten Start neu auf.
+
+**So entstehen die Texte der Lesehilfe** ([tools/extract_page_text.py](tools/extract_page_text.py)): Jede Buchseite, jeder Brief und jeder Aushang wird von drei unabhängigen Texterkennungs-Modellen gelesen (PaddleOCR-VL, Qwen3-VL-4B, GLM-OCR; Download beim ersten Start). Die drei Lesungen werden Wort für Wort verglichen: Ein Wort gilt nur, wenn mindestens zwei der drei es gleich lesen und keine andere Lesart gleichauf liegt. Eine Seite bekommt nur dann Text (`hd_assets/…/*.txt`), wenn das für **jedes** Wort gilt – sonst bleibt die Datei leer und `Leertaste` öffnet direkt die Lupe (die 4K-Seite vergrößert). Geraten wird nichts. Im Vergleich mit von Hand abgeschriebenen Seiten bekamen 9 von 13 Nahaufnahmen Text, alle buchstabengetreu; die übrigen (ein vom Finger verdecktes Wort, Handschrift, die Grabinschrift, das pseudo-arabische Anschlagbrett) zeigen die Lupe. Einzelne Modelle allein machen auf jeder zweiten Seite Fehler, oft als echte deutsche Wörter („böse“ statt „biblische“), die keine Rechtschreibprüfung findet – daher die Abstimmung. Texte lassen sich von Hand ergänzen oder korrigieren (ein Absatz pro Zeile, `---` zwischen den Seiten); Dateien mit Text überschreibt das Werkzeug nie (außer mit `--force`).
 
 <br>
 
@@ -288,7 +298,7 @@ Alle Optionen (Shader, VSync/FPS-Limit, Fenstergröße, Spiel- und HD-Verzeichni
 | **F10** | Entkoppelten High-Refresh-Cursor ein-/ausschalten |
 | **F11** oder **Alt+Enter** | Rahmenlosen Vollbildmodus umschalten |
 | **F12** | Widescreen-Seitenverhältnis wechseln (`Auto` / `16:10` / `16:9` / `4:3`) |
-| **Leertaste** oder **H** | Gedrückt halten, um interaktive Hotspots im Raum hervorzuheben |
+| **Leertaste** oder **H** | Gedrückt halten, um interaktive Hotspots im Raum hervorzuheben; auf Buchseiten, Briefen und Aushängen: Text lesen |
 | **Strg+L** (`Ctrl+L`) | Dialog- & Hinweisverlauf öffnen/schließen |
 | **Umschalt** (`Shift`) | Gedrückt halten für 2× Schnelllauf-Geschwindigkeit |
 | **Strg+P** oder **Druck** | Sauberen 4K-PNG-Screenshot speichern (`screenshots/`) |
@@ -418,6 +428,7 @@ A full **standalone x86-32 to native Linux x86_64 static recompiler** and **mode
 
 - **Quality of Life**:
   - **Hotspot highlighter** (hold `Space`/`H`): marks every clickable object straight from the game's scene graph, including rooms and minigames with custom logic.
+  - **Book & letter reader** (`Space`/`H` on a book page, controller: X) ([runtime/gl_page_reader.c](runtime/gl_page_reader.c)): shows the text of diaries, parchments, the tombstone inscription and the notice board as crisp, scalable type over the dimmed page, spreads in two columns. `Tab` switches to the **magnifier**: the 4K page enlarged, pan with mouse/arrow keys, zoom with wheel/`+`/`-`. Close with the same key, `Esc` or a click. The texts are read locally from your own game files when building the HD pack (`hd_assets/…/*.txt`, never in the repository); pages where text recognition is not certain open the magnifier directly.
   - **Fast walk** (hold `Shift` = `2×`, permanent `1.5×`/`2.0×` in the `F1` menu), **4K screenshots** (`Ctrl+P` / `PrintScreen`), a rolling **savegame backup** (`game_files/mha2.sav/autosave_backup/`, at most every 3 minutes on room changes) and an optional desktop launcher ([tools/install_desktop.sh](tools/install_desktop.sh)).
 
 - **Quick Save & Quick Load (`Ctrl+S` / `Ctrl+O`, controller: D-pad Up/Down)**:
@@ -503,7 +514,7 @@ To package a self-contained portable x86_64 `.tar.gz` bundle using the Ubuntu 22
 ```bash
 make lift
 bash tools/package_portable_linux.sh            # all-in-one bundle (personal use)
-bash tools/package_portable_linux.sh --split    # small runtime archive + separate HD asset pack, no game files
+bash tools/package_portable_linux.sh --split    # small runtime archive, no game files (+ tar of your own hd_assets/, private only)
 ```
 
 Installing the split release (your own game files, shared data directory `~/.local/share/mha2-remastered/`): [docs/INSTALL.md](docs/INSTALL.md).
@@ -527,7 +538,7 @@ tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz 
 ```
 
 - Only program files are replaced (`mha2_linux`, `lib/`, `fonts/`, `PLAY.sh`, docs). **Savegames (`game_files/mha2.sav/`), `mha2_settings.ini`, game files, screenshots and `hd_assets/` stay untouched** — the archive contains none of them.
-- This also works for older all-in-one bundles (game files + HD assets in one archive). The 5 GB HD asset pack only needs to be extracted again (`tar -xf …_HD_Assets.tar --strip-components=1 -C .`) when the HD assets changed.
+- This also works for older all-in-one bundles (game files + HD assets in one archive). The HD asset pack is never part of a release; you build it yourself (see *Building the 4K AI Neural HD Pack*) and it stays untouched by updates.
 - For automatic updates, install via `git clone` instead (see *Automatic Updates*); carry your saves over by copying `game_files/mha2.sav/` and `mha2_settings.ini` into the new install.
 
 <br>
@@ -538,7 +549,7 @@ tar -xzf ~/Downloads/Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz 
 
 ## Building the 4K AI Neural HD Pack (`hd_assets/`)
 
-The HD pack is optional and not needed to play. The current pack uses the SPAN model `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA GPU recommended). Put the model file at `tools/models/sr/4x-ClearRealityV1.safetensors` yourself. A separate Nix environment provides every tool (PyTorch with CUDA, `spandrel`, OpenCV, Pillow, FFmpeg, Real-ESRGAN). It is kept apart from `shell.nix` because it is several GB and contains unfree CUDA packages:
+The HD pack is optional and not needed to play. **It is not distributed:** all 4K images, sprites, videos and page texts are derived from the copyrighted original art, so everyone builds it from their own copy of the game in `game_files/` (NVIDIA GPU with CUDA, about 17 GB free disk space: pack ~5 GB, upscaling models ~0.7 GB, text-recognition models ~11 GB in `~/.cache/huggingface`, deletable afterwards). Without the HD pack the game runs in its original 2005 graphics with all engine features. The current pack uses the SPAN model `4x-ClearRealityV1` (PyTorch + `spandrel`, NVIDIA GPU recommended). Put the model file at `tools/models/sr/4x-ClearRealityV1.safetensors` yourself. A separate Nix environment provides every tool (PyTorch with CUDA, `spandrel`, OpenCV, Pillow, FFmpeg, Real-ESRGAN). It is kept apart from `shell.nix` because it is several GB and contains unfree CUDA packages:
 
 ```bash
 nix-shell nix/assets-shell.nix     # or: nix develop .#assets
@@ -548,6 +559,13 @@ M=tools/models/sr/4x-ClearRealityV1.safetensors
 python3 tools/upscale_transformer.py --apply-backgrounds $M
 python3 tools/upscale_transformer.py --apply-jpeg-strips $M
 python3 tools/upscale_transformer.py --apply-sprites $M
+# Redo the readable close-ups (book pages, letters, map) after --apply-backgrounds: remove the JPEG
+# block artifacts first (FBCNN, https://github.com/jiaxi-jiang/FBCNN/releases/download/v1.0/fbcnn_color.pth
+# into tools/models/sr/), then 4×, so the lettering doesn't break up into boxes:
+python3 tools/upscale_transformer.py --apply-text-screens $M
+# Page texts for the reader: three OCR models (PaddleOCR-VL, Qwen3-VL-4B, GLM-OCR, ~11 GB download)
+# read every page; text only where every word has a clear majority, otherwise the magnifier only:
+python3 tools/extract_page_text.py
 
 # Smooth the cursors and convert everything to lossless WebP:
 python3 tools/polish_cursors.py
@@ -566,6 +584,8 @@ python3 tools/extract_assets.py --images -o extracted_assets
 ```
 
 After changing `hd_assets/`, delete `hd_assets/.hd_index.cache` and `hd_assets/.hd_sprite_index.cache`; the game rebuilds them on the next start.
+
+**How the book reader texts are made** ([tools/extract_page_text.py](tools/extract_page_text.py)): every book page, letter and notice is read by three independent text-recognition models (PaddleOCR-VL, Qwen3-VL-4B, GLM-OCR; downloaded on first use). The three readings are compared word by word: a word only counts if at least two of the three read it the same way and no other reading ties with it. A page only gets text (`hd_assets/…/*.txt`) if that holds for **every** word — otherwise the file stays empty and `Space` opens the magnifier (the enlarged 4K page) directly. Nothing is guessed. Compared with hand-made transcriptions, 9 of 13 close-ups got text, all letter-perfect; the rest (a word covered by a finger, handwriting, the tombstone, the pseudo-Arabic notice board) show the magnifier. Each model alone makes mistakes on every second page, often real German words ("böse" instead of "biblische") that no spell checker catches — hence the vote. Texts can be added or corrected by hand (one paragraph per line, `---` between pages); the tool never overwrites files that contain text (unless `--force`).
 
 <br>
 
@@ -603,7 +623,7 @@ After changing `hd_assets/`, delete `hd_assets/.hd_index.cache` and `hd_assets/.
 | **F10** | Toggle High-Refresh Decoupled Cursor |
 | **F11** or **Alt+Enter** | Toggle borderless fullscreen |
 | **F12** | Cycle Widescreen Aspect (`Auto` / `16:10` / `16:9` / `4:3`) |
-| **Space** or **H** | Hold to highlight interactive hotspots in the room |
+| **Space** or **H** | Hold to highlight interactive hotspots in the room; on book pages, letters and notices: read the text |
 | **Ctrl+L** | Open/Close Dialog & Clue History Log |
 | **Shift** | Hold for 2× fast-walk speed |
 | **Ctrl + P** or **PrintScreen** | Save clean 4K PNG screenshot (`screenshots/`) |

@@ -303,6 +303,83 @@ static void perform_action(int a) {
     }
 }
 
+/* Page reader: the release belonging to the press that opened/closed it is swallowed too,
+ * so the game never sees an unpaired key/button up. */
+static SDL_Keycode g_reader_key_release = 0;
+static int g_reader_mouse_release = -1, g_reader_pad_release = -1;
+
+static void reader_toggle_from_event(const SDL_Event *ev) {
+    if (ev->type == SDL_KEYDOWN) g_reader_key_release = ev->key.keysym.sym;
+    else if (ev->type == SDL_MOUSEBUTTONDOWN) g_reader_mouse_release = ev->button.button;
+    else if (ev->type == SDL_CONTROLLERBUTTONDOWN) g_reader_pad_release = ev->cbutton.button;
+    clear_held_qol_keys();
+    gl_renderer_toggle_page_reader();
+}
+
+static int reader_swallow_release(const SDL_Event *ev) {
+    if (ev->type == SDL_KEYUP && g_reader_key_release && ev->key.keysym.sym == g_reader_key_release) {
+        g_reader_key_release = 0;
+        return 1;
+    }
+    if (ev->type == SDL_MOUSEBUTTONUP && ev->button.button == g_reader_mouse_release) {
+        g_reader_mouse_release = -1;
+        return 1;
+    }
+    if (ev->type == SDL_CONTROLLERBUTTONUP && ev->cbutton.button == g_reader_pad_release) {
+        g_reader_pad_release = -1;
+        return 1;
+    }
+    return 0;
+}
+
+/* Page reader open: the game sees no input (a click would act on the page). The hotspot
+ * key, Escape, a click or pad A/B/Start/hotspot button close it; Tab / pad Y switch text
+ * and zoom view; in the zoom view mouse, arrows and D-pad pan, wheel, +/- and LB/RB zoom. */
+static void reader_handle_event(const SDL_Event *ev) {
+    int zoom = gl_renderer_page_reader_zoom_mode();
+    if (ev->type == SDL_KEYDOWN) {
+        SDL_Keycode k = ev->key.keysym.sym;
+        if (!ev->key.repeat && (k == SDLK_ESCAPE ||
+                                bindings_match_key(k, ev->key.keysym.mod, NULL) == ACT_HOTSPOTS)) {
+            reader_toggle_from_event(ev);
+        } else if (!ev->key.repeat && k == SDLK_TAB) {
+            gl_renderer_page_reader_switch_view();
+        } else if (zoom && (k == SDLK_PLUS || k == SDLK_EQUALS || k == SDLK_KP_PLUS)) {
+            gl_renderer_page_reader_zoom(1);
+        } else if (zoom && (k == SDLK_MINUS || k == SDLK_KP_MINUS)) {
+            gl_renderer_page_reader_zoom(-1);
+        } else if (zoom && (k == SDLK_LEFT || k == SDLK_RIGHT || k == SDLK_UP || k == SDLK_DOWN)) {
+            gl_renderer_page_reader_pan(k == SDLK_LEFT ? -0.08f : k == SDLK_RIGHT ? 0.08f : 0.0f,
+                                        k == SDLK_UP ? -0.08f : k == SDLK_DOWN ? 0.08f : 0.0f, 1);
+        }
+    } else if (ev->type == SDL_MOUSEBUTTONDOWN) {
+        reader_toggle_from_event(ev);
+    } else if (ev->type == SDL_MOUSEWHEEL && zoom) {
+        gl_renderer_page_reader_zoom(ev->wheel.y > 0 ? 1 : (ev->wheel.y < 0 ? -1 : 0));
+    } else if (ev->type == SDL_MOUSEMOTION && zoom) {
+        int ww = 0, wh = 0;
+        SDL_Window *win = SDL_GetWindowFromID(ev->motion.windowID);
+        if (win) SDL_GetWindowSize(win, &ww, &wh);
+        if (ww > 0 && wh > 0)
+            gl_renderer_page_reader_pan((float)ev->motion.x / (float)ww, (float)ev->motion.y / (float)wh, 0);
+    } else if (ev->type == SDL_CONTROLLERBUTTONDOWN) {
+        Uint8 b = ev->cbutton.button;
+        if (b == SDL_CONTROLLER_BUTTON_A || b == SDL_CONTROLLER_BUTTON_B ||
+            b == SDL_CONTROLLER_BUTTON_START || bindings_match_pad(b, NULL) == ACT_HOTSPOTS) {
+            reader_toggle_from_event(ev);
+        } else if (b == SDL_CONTROLLER_BUTTON_Y) {
+            gl_renderer_page_reader_switch_view();
+        } else if (zoom && (b == SDL_CONTROLLER_BUTTON_LEFTSHOULDER || b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) {
+            gl_renderer_page_reader_zoom(b == SDL_CONTROLLER_BUTTON_RIGHTSHOULDER ? 1 : -1);
+        } else if (zoom && b >= SDL_CONTROLLER_BUTTON_DPAD_UP && b <= SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+            gl_renderer_page_reader_pan(b == SDL_CONTROLLER_BUTTON_DPAD_LEFT ? -0.08f :
+                                        b == SDL_CONTROLLER_BUTTON_DPAD_RIGHT ? 0.08f : 0.0f,
+                                        b == SDL_CONTROLLER_BUTTON_DPAD_UP ? -0.08f :
+                                        b == SDL_CONTROLLER_BUTTON_DPAD_DOWN ? 0.08f : 0.0f, 1);
+        }
+    }
+}
+
 static int is_user_input_event(Uint32 type) {
     switch (type) {
     case SDL_KEYDOWN: case SDL_KEYUP: case SDL_TEXTINPUT:
@@ -340,6 +417,11 @@ void win32_pump_sdl_events(void) {
                 g_gamepad = NULL;
                 gl_renderer_show_toast("Controller Disconnected");
             }
+            continue;
+        }
+        if (reader_swallow_release(&ev)) continue;
+        if (gl_renderer_is_page_reader_open() && is_user_input_event(ev.type)) {
+            reader_handle_event(&ev);
             continue;
         }
         if (ev.type == SDL_CONTROLLERBUTTONDOWN || ev.type == SDL_CONTROLLERBUTTONUP) {
@@ -380,7 +462,9 @@ void win32_pump_sdl_events(void) {
             } else {
                 int slot = 0;
                 int a = bindings_match_pad(btn, &slot);
-                if (a >= 0 && bindings_is_hold(a)) set_hold_action(a, 4u << slot, down);
+                if (a == ACT_HOTSPOTS && down && gl_renderer_page_reader_available()) {
+                    reader_toggle_from_event(&ev);  /* on a book/letter page: read it */
+                } else if (a >= 0 && bindings_is_hold(a)) set_hold_action(a, 4u << slot, down);
                 else if (a >= 0 && down) perform_action(a);
             }
             continue;
@@ -445,6 +529,10 @@ void win32_pump_sdl_events(void) {
                 SDL_Keycode sym = ev.key.keysym.sym;
                 int slot = 0;
                 int act = bindings_match_key(sym, ev.key.keysym.mod, &slot);
+                if (act == ACT_HOTSPOTS && !ev.key.repeat && gl_renderer_page_reader_available()) {
+                    reader_toggle_from_event(&ev);  /* on a book/letter page: read it */
+                    break;
+                }
                 if (act >= 0 && bindings_is_hold(act)) {
                     set_hold_action(act, 1u << slot, 1); /* hold keys still reach the game */
                 } else if (act >= 0) {

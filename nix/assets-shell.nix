@@ -45,6 +45,8 @@ let
     ps.torchvision-bin
     spandrel
     spandrel-extra-arches
+    ps.packaging # safetensors.torch imports it but nixpkgs does not propagate it
+    ps.transformers # OCR vision models for tools/extract_page_text.py (uses torch-bin above)
     ps.numpy
     ps.pillow
     ps.opencv4

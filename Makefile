@@ -29,6 +29,7 @@ RT_SRCS := \
 	runtime/gl_shaders.c \
 	runtime/gl_menu.c \
 	runtime/gl_dialog_log.c \
+	runtime/gl_page_reader.c \
 	runtime/hd_assets.c \
 	runtime/win32_kernel.c \
 	runtime/win32_user_gdi.c \

@@ -1,21 +1,25 @@
 # Installing the Linux Release
 
-The release is split into three parts so engine updates stay small:
+The engine is kept apart from everything that belongs to the game, so engine updates stay small:
 
-| Part | Size | Contents |
+| Part | Size | Where it comes from |
 |---|---|---|
 | `…_Runtime.tar.gz` | small | `mha2_linux`, bundled libraries, fonts, `PLAY.sh`, docs |
-| `…_HD_Assets.tar` | ~5 GB | 4K backgrounds, sprites, cursors and cutscenes (`hd_assets/`) |
 | your game files | ~480 MB | `mha2.dat`, `mha2.exe`, `*.avi` from your own copy of the game |
+| `hd_assets/` (optional) | ~5 GB | **built by you** from your game files (see below) |
 
-`SHA256SUMS` covers both archives (`sha256sum -c SHA256SUMS`).
+The HD pack (4K backgrounds, sprites, cursors, cutscenes and the page texts of the book
+reader) is derived from the game's copyrighted art, so it is never published. Without it
+the game runs in its original 2005 graphics with all engine features; with it you get the
+4K remaster. `SHA256SUMS` covers the runtime archive (`sha256sum -c SHA256SUMS`).
 
 ## Layout A — everything in one folder
 
 ```bash
 tar -xzf Moorhuhn_Adventure2_Remastered_Linux_x86_64_Runtime.tar.gz
-tar -xf  Moorhuhn_Adventure2_Remastered_HD_Assets.tar      # same top-level folder
 cp /path/to/your/game/{mha2.dat,mha2.exe,*.avi} Moorhuhn_Adventure2_Remastered_Linux_x86_64/game_files/
+# optional: your self-built HD pack
+cp -a /path/to/your/hd_assets Moorhuhn_Adventure2_Remastered_Linux_x86_64/
 ./Moorhuhn_Adventure2_Remastered_Linux_x86_64/PLAY.sh
 ```
 
@@ -60,14 +64,37 @@ Use `tools/extract_game.py` from the source repository to extract the files from
 original installer (`Setup.EXE`) or CD image (`.bin`/`.iso`). The engine never ships or
 downloads original game data.
 
+## Building the HD pack
+
+The HD pack is built from a `git clone` of the source repository with your game files in
+`game_files/`; the complete command list is in the README section "Building the 4K AI
+Neural HD Pack". You need an NVIDIA GPU (CUDA) and about 17 GB of free disk space: the
+finished pack is ~5 GB, the upscaling models ~0.7 GB and the text-recognition models ~11 GB
+(in `~/.cache/huggingface`, deletable afterwards). Copy the resulting `hd_assets/` next to the
+runtime (Layout A) or into the shared data directory (Layout B).
+
+One step creates the texts for the book reader (`Space` on a book page, letter or notice):
+`tools/extract_page_text.py` reads every page with three independent text-recognition
+models (PaddleOCR-VL, Qwen3-VL-4B, GLM-OCR; downloaded on first use). The
+three readings are compared word by word, and a page only gets text if every word is
+backed by at least two of the three. Pages where they disagree (a word hidden behind a
+finger, handwriting, the pseudo-Arabic notice board) get no text; `Space` then opens the
+magnifier, an enlarged view of the 4K page. Nothing is ever guessed: in tests against
+hand-made transcriptions every accepted page was letter-perfect. You can correct or add
+texts by hand in `hd_assets/…/*.txt` (one paragraph per line, `---` between pages); the
+tool never overwrites files that contain text.
+
 ## Building the release
 
 ```bash
 make lift                                        # once, generates recomp/gen/
-bash tools/package_portable_linux.sh --split     # runtime + HD asset pack + SHA256SUMS
-bash tools/package_portable_linux.sh             # legacy all-in-one bundle (personal use)
+bash tools/package_portable_linux.sh --split     # runtime archive + SHA256SUMS (+ a tar of your own hd_assets/)
+bash tools/package_portable_linux.sh             # all-in-one bundle with your game files (personal use)
 ```
 
 AppImage / Flatpak packaging is not provided: `appimagetool` is not in nixpkgs, and
 Flatpak needs multi-GB SDK runtimes. The split runtime already gives small engine
 updates, and Layout B gives the same "data outside the program" separation.
+
+Only the runtime archive may be shared. The HD tar from `--split` and the all-in-one bundle
+contain game-derived data and are for your own machines only.

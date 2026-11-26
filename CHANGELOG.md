@@ -4,6 +4,27 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
+## [v5.6.0 — Book & Letter Reader, Magnifier & Readable Close-Ups] (2026-11-26)
+
+### New Features
+- **Book & Letter Reader (`Space`/`H` on a page, controller: `X`)**: on the close-ups of diaries, parchments, the tombstone inscription and the notice board, the hotspot key opens the page text as a clean, scalable text box over the dimmed page (`runtime/gl_page_reader.c`). Two-page spreads are shown in two columns, headings in bold, and the size follows *Overlay Text Size* in `F1`. A short hint appears when such a page opens. `Space`/`H`, `Esc`, a click or pad `A`/`B`/`Start` close it; the game sees none of these inputs, so closing never turns a page or leaves the close-up.
+- **Magnifier**: `Tab` (controller: `Y`) switches the reader to the 4K page itself, enlarged; pan with the mouse, arrow keys or D-pad, zoom with the wheel, `+`/`-` or `LB`/`RB`. Pages without reliable text open the magnifier directly.
+
+### Improvements
+- **Readable Close-Ups Re-Upscaled**: the 2005 JPEGs of the 16 close-ups with text carry 8×8 block artifacts around every letter, which the 4× model sharpened into visible boxes and wobbly strokes. They are now cleaned with the FBCNN JPEG artifact remover before the 4× upscale (`tools/upscale_transformer.py --apply-text-screens`); every other image is unchanged.
+
+### HD Pack Tooling
+- **Page Texts by Majority Vote (`tools/extract_page_text.py`)**: three independent text-recognition models (PaddleOCR-VL, Qwen3-VL-4B, GLM-OCR) read every page; a word only counts if at least two agree and no other reading ties, and a page only gets text if every word passes. Otherwise it gets the magnifier. Against hand-made transcriptions, 9 of 13 close-ups got text, all letter-perfect, and none got a wrong word. Nine tools were compared: single models misread a word on about every second page, often as a real German word that no spell checker catches. Hand-corrected texts are never overwritten.
+- **`tools/text_screens.py`**: shared list of the readable close-ups and their measured page areas.
+- **`nix/assets-shell.nix`**: adds `transformers` for the text-recognition models and fixes `.safetensors` models failing to load (`packaging` was missing).
+- The startup log now names the video driver, window and drawable size.
+
+### Documentation
+- **The HD pack is not distributed**: it is derived from the copyrighted original art, so players build it from their own copy of the game. README (DE/EN) and `docs/INSTALL.md` describe the self-built pack, its requirements and how the reader texts are made; the packager marks the HD tar written by `--split` as personal use only.
+- **Updating a self-built HD pack** for the reader: `python3 tools/upscale_transformer.py --apply-text-screens tools/models/sr/4x-ClearRealityV1.safetensors` (with `fbcnn_color.pth` in `tools/models/sr/`), then `python3 tools/extract_page_text.py`, both in `nix-shell nix/assets-shell.nix`.
+
+---
+
 ## [v5.5.4 — Savegame Backup Path, F1 Menu Footer & README Audit] (2026-11-25)
 
 ### Fixes

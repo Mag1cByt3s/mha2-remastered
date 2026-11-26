@@ -428,6 +428,11 @@ const char *hd_assets_get_name(int asset_id) {
     return g_assets[asset_id].rel_name;
 }
 
+const char *hd_assets_get_path(int asset_id) {
+    if (asset_id < 0 || asset_id >= g_asset_count) return "";
+    return g_assets[asset_id].full_path;
+}
+
 int hd_assets_decode_wide_rgba(int asset_id, HdImageRGBA *out) {
     if (!out || asset_id < 0 || asset_id >= g_asset_count) return -1;
     const char *base = g_assets[asset_id].full_path;

@@ -756,7 +756,7 @@ static int quick_ready(const char *what) {
     if (g_macro) return 0; /* a macro is already driving the game */
     const char *room = cur_room();
     if (strncmp(room, "l/", 2) != 0 || win32_avi_is_playing() || gl_menu_is_open() ||
-        gl_renderer_is_dialog_log_open()) {
+        gl_renderer_is_dialog_log_open() || gl_renderer_is_page_reader_open()) {
         gl_renderer_show_toast("%s: only available while exploring a room", what);
         fprintf(stderr, "[macro] rejected %s: not in a room (room '%s')\n", what, room);
         return 0;

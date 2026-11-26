@@ -6,6 +6,7 @@
  *   gl_shaders.c    - GLSL 330 core shader sources
  *   gl_menu.c       - interactive F1 settings menu
  *   gl_dialog_log.c - Ctrl+L dialog & clue history overlay
+ *   gl_page_reader.c - Space page reader for books, letters and notices
  * Not part of the public renderer API (gl_renderer.h); do not include elsewhere.
  */
 #include "runtime.h"
@@ -30,6 +31,10 @@ extern TTF_Font *g_osd_font;
 int  clamp_i(int v, int lo, int hi);
 void draw_osd_quad(GLuint tex, int x_px, int y_px, int w_px, int h_px,
                    int draw_w, int draw_h, float alpha);
+void draw_osd_quad_uv(GLuint tex, float x_px, float y_px, float w_px, float h_px,
+                      float u0, float v0, float u1, float v1,
+                      int draw_w, int draw_h, float alpha);
+GLuint gl_bg_texture(int asset_id, int *w, int *h);   /* cached 4K background texture */
 void init_osd_font(void);
 TTF_Font *get_native_font(int px_size, int bold);
 void flush_canvas_text_cache(void);
@@ -50,5 +55,11 @@ int  gl_menu_needs_redraw(void);
 void gl_dialog_log_draw(int draw_w, int draw_h);
 void gl_dialog_log_shutdown(void);
 void gl_dialog_log_mark_dirty(void);  /* re-render (e.g. text size changed) */
+
+/* ---- gl_page_reader.c ---- */
+void gl_page_reader_poll(void);       /* per frame: page change, key hint toast */
+void gl_page_reader_draw(int draw_w, int draw_h);
+void gl_page_reader_shutdown(void);
+void gl_page_reader_mark_dirty(void);
 
 #endif

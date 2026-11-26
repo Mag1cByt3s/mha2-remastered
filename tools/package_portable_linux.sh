@@ -11,8 +11,9 @@ for arg in "$@"; do
         --split) SPLIT=1 ;;
         *)
             echo "Usage: $0 [--no-archive] [--split]" >&2
-            echo "  --split  small runtime archive (no game files, no HD assets) + separate HD asset" >&2
-            echo "           tar + SHA256SUMS; players supply their own game files" >&2
+            echo "  --split  small runtime archive (no game files, no HD assets) + a separate tar of" >&2
+            echo "           your own hd_assets/ + SHA256SUMS. The HD tar contains game-derived art and" >&2
+            echo "           page text: personal use only (e.g. copying to another PC), never publish it" >&2
             exit 2
             ;;
     esac
@@ -251,9 +252,9 @@ UPDATING (savegames and settings are kept):
   3. Start ./PLAY.sh as usual; the F1 menu title shows the new version.
   The runtime archive only contains the program (mha2_linux, lib/, fonts/, PLAY.sh,
   docs). Your game_files/ (incl. saves in game_files/mha2.sav/), mha2_settings.ini,
-  screenshots/ and hd_assets/ are left untouched. Only re-extract the HD asset pack
-  (Moorhuhn_Adventure2_Remastered_HD_Assets.tar, same command with -xf) if you were
-  told that the HD assets changed.
+  screenshots/ and hd_assets/ are left untouched. The HD asset pack is never part of
+  a release (copyright): build it yourself from your own game files, see the README
+  section "Building the 4K AI Neural HD Pack".
 EOF
 
 if [[ "$MAKE_ARCHIVE" -eq 1 && "$SPLIT" -eq 1 ]]; then
@@ -263,7 +264,7 @@ if [[ "$MAKE_ARCHIVE" -eq 1 && "$SPLIT" -eq 1 ]]; then
     tar -czf "$RT_ARCHIVE" -C "$ROOT/work/dist" "$DIST_NAME"
     # WebP/MP4 are already compressed: plain tar, rooted at the same top-level folder so
     # both archives extract into one directory.
-    echo "[pack] Creating HD asset pack $HD_ARCHIVE ..."
+    echo "[pack] Creating HD asset pack $HD_ARCHIVE (personal use only, do not publish) ..."
     tar -cf "$HD_ARCHIVE" -C "$ROOT" --transform "s,^hd_assets,$DIST_NAME/hd_assets," hd_assets
     (cd "$ROOT/work/dist" && sha256sum "$(basename "$RT_ARCHIVE")" "$(basename "$HD_ARCHIVE")" > SHA256SUMS)
     ls -lh "$RT_ARCHIVE" "$HD_ARCHIVE" "$ROOT/work/dist/SHA256SUMS"

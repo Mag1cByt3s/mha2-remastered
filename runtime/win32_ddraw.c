@@ -692,6 +692,10 @@ void ddraw_present_surface(DDrawSurface *surf) {
                                (int)surf->pitch, (int)surf->bpp);
 }
 
+int ddraw_active_bg_asset(void) {
+    return g_last_bg_asset_id;
+}
+
 void ddraw_present_rgb24(const uint8_t *rgb, int w, int h, int stride) {
     g_last_bg_surface_va = 0;
     g_last_bg_asset_id = -1;

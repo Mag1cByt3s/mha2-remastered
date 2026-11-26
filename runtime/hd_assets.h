@@ -29,6 +29,8 @@ const HdImageRGBA *hd_assets_get_rgba(int asset_id);
 
 /* Return relative asset name (e.g. "x/001/img/objBg.png") for HUD/toast display. */
 const char *hd_assets_get_name(int asset_id);
+/* Absolute path of the HD file (e.g. <hd_dir>/m/017/img/objBg.webp), "" if invalid */
+const char *hd_assets_get_path(int asset_id);
 
 /* Decode optional 16:9 widescreen extended sibling (*_wide.webp / *_wide.png) for 4:3 menus.
  * Returns 0 on success (caller frees via hd_sprites_free_rgba), or -1 if none exists. */

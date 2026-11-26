@@ -633,6 +633,7 @@ static void menu_apply_delta(int row_id, int dir) {
             idx = (idx + (dir > 0 ? 1 : 4)) % 5;
             g_cfg.overlay_text_scale = steps[idx];
             gl_dialog_log_mark_dirty();
+            gl_page_reader_mark_dirty();
             gl_renderer_show_toast("Overlay Text Size: %d%%", g_cfg.overlay_text_scale);
             break;
         }
