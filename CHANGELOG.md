@@ -4,6 +4,17 @@ All notable changes to the **Moorhuhn Adventure 2: Der Fluch des Goldes — Nati
 
 ---
 
+## [v5.6.1 — Blurry Chest & Door After the Explosion, Permanent Reader Hint] (2026-11-28)
+
+### Fixes
+- **Blurry Chest, Wall and Door in the Castle Room After the Explosion (`l/011`)**: this room reuses the chest, the wall/door section and the door frame of the intact room `l/010`. Their HD versions were rejected because HD sprites are only accepted from the current room's folder, so the original 1× pixels were scaled up instead. Rooms that draw shared (`x*`) sprites of another room are now listed in `runtime/hd_assets.c` (found in the room scripts): `l/011` → `l/010`, and the pyramid corridors `l/030`–`l/035` → the torch of `l/029`.
+
+### Improvements
+- **Permanent Reader Hint**: on a page with a reader, a small, subtle `Space/H: read text` (or `…: magnifier`) line now stays at the bottom edge — in 16:10 inside the black band below the picture — instead of a short toast that was easy to miss. It fades in once the page is up, waits while another toast is shown and follows the key bindings.
+- **No More "HD Background" Toast** when a background changes.
+
+---
+
 ## [v5.6.0 — Book & Letter Reader, Magnifier & Readable Close-Ups] (2026-11-26)
 
 ### New Features

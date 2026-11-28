@@ -449,6 +449,10 @@ static uint32_t g_hud_last_update = 0;
 static GLuint g_toast_tex = 0;
 static int g_toast_w = 0, g_toast_h = 0;
 static uint32_t g_toast_until = 0;
+
+int gl_toast_visible(void) {
+    return SDL_GetTicks() < g_toast_until;
+}
 static char g_toast_text[256] = "";
 static int g_toast_dirty = 0;
 
@@ -1612,9 +1616,6 @@ static BgTexEntry *bg_cache_acquire(int asset_id) {
     }
     hd_sprites_free_rgba(&wimg);
 
-    if (g_cfg.hd_assets_enabled) {
-        gl_renderer_show_toast("HD Background: %s (%dx%d)", hd_assets_get_name(asset_id), victim->hd_w, victim->hd_h);
-    }
     return victim;
 }
 
@@ -2702,8 +2703,8 @@ float gl_renderer_current_fps(void) {
 static void gl_draw_frame_common(int src_w, int src_h, int src_bpp) {
     uint32_t now_ms = SDL_GetTicks();
     if (g_startup_notice[0]) {
-        /* wait until the main menu has been up for a moment: the "HD Background" toast
-           fired on menu entry would otherwise overwrite the notice immediately */
+        /* wait until the main menu has been up for a moment, so the notice is not lost in
+           the intro -> menu transition */
         static uint32_t s_menu_since = 0;
         const char *room = hd_sprites_room_prefix();
         int on_menu = game_is_main_menu_active() || (room && strcmp(room, "x/001/") == 0);
@@ -3223,6 +3224,8 @@ static void gl_draw_frame_common(int src_w, int src_h, int src_bpp) {
         gl_dialog_log_draw(draw_w, draw_h);
     } else if (gl_renderer_is_page_reader_open()) {
         gl_page_reader_draw(draw_w, draw_h);
+    } else {
+        gl_page_reader_draw_hint(draw_w, draw_h);
     }
 
     /* Full composited frame incl. overlays/HUD/menus (replay `shotfull`) */

@@ -31,6 +31,7 @@ extern TTF_Font *g_osd_font;
 int  clamp_i(int v, int lo, int hi);
 void draw_osd_quad(GLuint tex, int x_px, int y_px, int w_px, int h_px,
                    int draw_w, int draw_h, float alpha);
+int  gl_toast_visible(void);   /* a toast occupies the bottom centre right now */
 void draw_osd_quad_uv(GLuint tex, float x_px, float y_px, float w_px, float h_px,
                       float u0, float v0, float u1, float v1,
                       int draw_w, int draw_h, float alpha);
@@ -59,6 +60,7 @@ void gl_dialog_log_mark_dirty(void);  /* re-render (e.g. text size changed) */
 /* ---- gl_page_reader.c ---- */
 void gl_page_reader_poll(void);       /* per frame: page change, key hint toast */
 void gl_page_reader_draw(int draw_w, int draw_h);
+void gl_page_reader_draw_hint(int draw_w, int draw_h);  /* bottom hint while closed */
 void gl_page_reader_shutdown(void);
 void gl_page_reader_mark_dirty(void);
 

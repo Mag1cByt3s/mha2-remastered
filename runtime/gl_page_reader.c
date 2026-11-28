@@ -32,7 +32,9 @@ static int    g_zoom_mode = 0;              /* 0: text box, 1: zoom view */
 static float  g_zoom = 2.0f;                /* magnification relative to the fitted page */
 static float  g_pan_x = 0.5f, g_pan_y = 0.5f;  /* view centre, 0..1 across the image */
 static GLuint g_hint_tex = 0;
-static int    g_hint_w = 0, g_hint_h = 0, g_hint_mode = -1;
+static int    g_hint_w = 0, g_hint_h = 0;
+static char   g_hint_text[192] = "";   /* text g_hint_tex was rendered from */
+static uint32_t g_page_since = 0;       /* SDL ticks when the current page appeared (0: none) */
 
 /* Load (once per background) the .txt next to the active HD background. */
 static const char *active_page_text(void) {
@@ -103,19 +105,18 @@ void gl_renderer_page_reader_pan(float x, float y, int relative) {
     gl_renderer_redraw_if_needed(1);
 }
 
-/* Per frame: close when the page goes away, announce the key once per opened page. */
+/* Per frame: close when the page goes away, note when a new page appears (bottom hint). */
 void gl_page_reader_poll(void) {
     static int announced = -2;
     if (active_page_text() == NULL) {
         g_reader_open = 0;
         announced = -2;
+        g_page_since = 0;
         return;
     }
     if (announced != g_text_asset) {
         announced = g_text_asset;
-        char keys[64];
-        bindings_describe(ACT_HOTSPOTS, keys, sizeof(keys));
-        gl_renderer_show_toast(g_text[0] ? "Press %s to read the text" : "Press %s to zoom in on the page", keys);
+        g_page_since = SDL_GetTicks() ? SDL_GetTicks() : 1u;
         g_reader_dirty = 1;
     }
 }
@@ -290,24 +291,19 @@ out:
     free(L.heading);
 }
 
-/* Bottom hint pill for the zoom view (re-rendered when the text/zoom-only kind changes). */
-static void draw_zoom_hint(int draw_w, int draw_h) {
-    static int hint_draw_h = 0;
-    int kind = g_text[0] != '\0';
-    if (!g_hint_tex || g_hint_mode != kind || hint_draw_h != draw_h) {
-        hint_draw_h = draw_h;
-        char keys[64], hint[192];
-        bindings_describe(ACT_HOTSPOTS, keys, sizeof(keys));
-        snprintf(hint, sizeof(hint), "Mouse/arrows: pan   |   Wheel/+/-: zoom   |   %s%s, Esc or click: close",
-                 kind ? "Tab: text   |   " : "", keys);
-        TTF_Font *f = get_native_font((draw_h * 15) / 1000 > 13 ? (draw_h * 15) / 1000 : 13, 0);
+/* Hint pill at the bottom centre: rendered once per text / window height / size step. */
+static void draw_hint_pill(const char *hint, int draw_w, int draw_h, int small, float alpha) {
+    static int hint_draw_h = 0, hint_small = -1;
+    if (!g_hint_tex || strcmp(g_hint_text, hint) != 0 || hint_draw_h != draw_h || hint_small != small) {
+        int px = (draw_h * (small ? 13 : 15)) / 1000;
+        TTF_Font *f = get_native_font(px > 12 ? px : 12, 0);
         if (!f) f = g_osd_font;
         SDL_Surface *ts = f ? TTF_RenderUTF8_Blended(f, hint, (SDL_Color){ 235, 228, 210, 255 }) : NULL;
         if (!ts) return;
         int pad = ts->h / 2;
         SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, ts->w + 2 * pad, ts->h + pad, 32, SDL_PIXELFORMAT_RGBA32);
         if (s) {
-            SDL_FillRect(s, NULL, SDL_MapRGBA(s->format, 0, 0, 0, 170));
+            SDL_FillRect(s, NULL, SDL_MapRGBA(s->format, 0, 0, 0, small ? 140 : 170));
             SDL_SetSurfaceBlendMode(ts, SDL_BLENDMODE_BLEND);
             SDL_Rect dr = { pad, pad / 2, ts->w, ts->h };
             SDL_BlitSurface(ts, NULL, s, &dr);
@@ -320,13 +316,43 @@ static void draw_zoom_hint(int draw_w, int draw_h) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, s->w, s->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, s->pixels);
             g_hint_w = s->w;
             g_hint_h = s->h;
-            g_hint_mode = kind;
+            snprintf(g_hint_text, sizeof(g_hint_text), "%s", hint);
+            hint_draw_h = draw_h;
+            hint_small = small;
             SDL_FreeSurface(s);
         }
         SDL_FreeSurface(ts);
     }
     draw_osd_quad(g_hint_tex, (draw_w - g_hint_w) / 2, draw_h - g_hint_h - draw_h / 40,
-                  g_hint_w, g_hint_h, draw_w, draw_h, 1.0f);
+                  g_hint_w, g_hint_h, draw_w, draw_h, alpha);
+}
+
+static void draw_zoom_hint(int draw_w, int draw_h) {
+    char keys[64], hint[192];
+    bindings_describe(ACT_HOTSPOTS, keys, sizeof(keys));
+    snprintf(hint, sizeof(hint), "Mouse/arrows: pan   |   Wheel/+/-: zoom   |   %s%s, Esc or click: close",
+             g_text[0] ? "Tab: text   |   " : "", keys);
+    draw_hint_pill(hint, draw_w, draw_h, 0, 1.0f);
+}
+
+/* Reader closed on a page that has one: a small, permanent hint at the bottom edge
+ * (in 16:10 inside the black band below the picture). It fades in after the page has
+ * been up for a moment, so scene transitions do not flash it, and waits while a toast
+ * (same spot: volume, quick save, F-key toggles) is shown. */
+void gl_page_reader_draw_hint(int draw_w, int draw_h) {
+    static uint32_t visible_since = 0;
+    if (g_reader_open || !g_text || g_page_since == 0 || gl_toast_visible() ||
+        SDL_GetTicks() - g_page_since < 700u) {
+        visible_since = 0;
+        return;
+    }
+    if (!visible_since) visible_since = SDL_GetTicks() ? SDL_GetTicks() : 1u;
+    uint32_t up = SDL_GetTicks() - visible_since;
+    float alpha = up >= 600u ? 0.85f : 0.85f * (float)up / 600.0f;
+    char keys[64], hint[128];
+    bindings_describe(ACT_HOTSPOTS, keys, sizeof(keys));
+    snprintf(hint, sizeof(hint), g_text[0] ? "%s: read text" : "%s: magnifier", keys);
+    draw_hint_pill(hint, draw_w, draw_h, 1, alpha);
 }
 
 /* Zoom view: the 4K page magnified around the pan centre, black around it. */
@@ -378,14 +404,14 @@ void gl_page_reader_draw(int draw_w, int draw_h) {
 
 void gl_page_reader_mark_dirty(void) {
     g_reader_dirty = 1;
-    g_hint_mode = -1;
+    g_hint_text[0] = '\0';
 }
 
 void gl_page_reader_shutdown(void) {
     if (g_reader_tex) { glDeleteTextures(1, &g_reader_tex); g_reader_tex = 0; }
     if (g_reader_dim_tex) { glDeleteTextures(1, &g_reader_dim_tex); g_reader_dim_tex = 0; }
     if (g_hint_tex) { glDeleteTextures(1, &g_hint_tex); g_hint_tex = 0; }
-    g_hint_mode = -1;
+    g_hint_text[0] = '\0';
     free(g_text);
     g_text = NULL;
     g_text_asset = -2;

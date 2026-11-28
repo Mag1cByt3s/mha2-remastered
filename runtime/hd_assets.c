@@ -617,6 +617,29 @@ uint32_t hd_sprites_get_room_gen(void) {
     return g_spr_room_gen;
 }
 
+/* Rooms that draw shared sprites of another room ("x" names: xobj*, xmsk*, xinv*). Taken
+ * from the room scripts (l/NNN/data._dat referencing other rooms' img/ paths):
+ *   l/011 (castle room after the explosion) -> l/010 chest, door, hook, scroll
+ *   l/030..l/035 (pyramid corridors)         -> l/029 torch
+ * (l/002..l/004 -> l/001 is handled below: those rooms run under the l/001 prefix.) */
+static const struct { const char room[7], owner[7]; } k_shared_sprite_rooms[] = {
+    { "l/011/", "l/010/" },
+    { "l/030/", "l/029/" }, { "l/031/", "l/029/" }, { "l/032/", "l/029/" },
+    { "l/033/", "l/029/" }, { "l/034/", "l/029/" }, { "l/035/", "l/029/" },
+};
+
+static int shared_sprite_of_active_room(const char *rel_name) {
+    const char *base = strrchr(rel_name, '/');
+    if (!base || base[1] != 'x') return 0;
+    for (size_t i = 0; i < sizeof(k_shared_sprite_rooms) / sizeof(k_shared_sprite_rooms[0]); i++) {
+        if (strcmp(g_spr_room_prefix, k_shared_sprite_rooms[i].room) == 0 &&
+            strncmp(rel_name, k_shared_sprite_rooms[i].owner, 6) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int sprite_allowed_in_active_room(const char *rel_name) {
     if (!rel_name) return 0;
     /* Global UI/cursors/inventory (g/) and Moorhuhn character animations (s/) are allowed in EVERY room! */
@@ -642,7 +665,7 @@ static int sprite_allowed_in_active_room(const char *rel_name) {
              strncmp(rel_name, "l/004/", 6) == 0)) {
             return 1;
         }
-        return 0;
+        return shared_sprite_of_active_room(rel_name);
     }
     return 0;
 }

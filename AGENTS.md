@@ -125,6 +125,7 @@ Guidance for coding agents working on the **Moorhuhn Adventure 2: Der Fluch des 
    - In `sprite_allowed_in_active_room()` (`runtime/hd_assets.c`), the allowlist for `/objBgO`, `/objBgU`, `/mskBg.`, and `/objWolken` **must stay before** `if (g_spr_room_prefix_len > 0)`.
    - `maybe_lock_split_room_from_sprite()` (`runtime/win32_ddraw.c`) may lock room state only from `/objBgO`, `/objBgU`, or `/mskBg.` — **never** from shared desert clouds `/objWolken`.
    - Keep `lookup_rle_both_sprite()` max width `>= 2048` (`l/023/img/mskBg` is `1600×212`).
+   - Rooms that draw another room's shared `x*` sprites (from the room scripts: `l/011` → `l/010`, `l/030`–`l/035` → `l/029`) are listed in `k_shared_sprite_rooms` (`runtime/hd_assets.c`); without an entry those sprites fall back to blurry 1× patches. Keep it limited to `x*` names of the listed owner room.
 
 3. **HD Asset Caches, `HDS5` Matching & Runtime Toggles:**
    - Adding, replacing, or deleting files in `hd_assets/` requires invalidating/rebuilding `.hd_index.cache` and/or `.hd_sprite_index.cache`.
